@@ -6,14 +6,14 @@ This script will be used on our private server to make our own life it bit easie
 
 ### planned
 
-1. distribute uranium in reactors
-2. automatic refinering
-3. automatic assembly
+1. automatic assembly
 
 ### done
 
 * keep assemblers clean
 * sort items
+* distribute uranium in reactors
+* automatic refinering
 
 ## how to used
 

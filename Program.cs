@@ -15,16 +15,31 @@ namespace SpaceEngineersInventoryManager
         #endregion
 
         #region Script Configuration
+
+        //linking item type names to container names
         const string CARGO_CONTAINER_CONFIG = "Ore:Ore Container;Ingot:Ingot Container;Component:Component Container;Ammo:Ammo Container;Gun:Ammo Container;";
+        //this container will not be touched by the sorting algoritme
         const string CARGO_CONTAINER_LOCKED = "Locked Container;";
+        //multiplier to ensure that there is no gap in the production process.
+        const int ASSEMBLER_STOCK_MULTIPLIER = 4;
+        //the name of the managed reactors
+        const string REACTOR_MANAGED_NAME = "Managed Reactor";
+        //amount of uranium ingot to try to keep in each reactor
+        const double REACTOR_MAX_URANIUM = 2500.00;
+        //the ore types that can be refined
+        readonly string[] REFINERY_PROCESS_ORETYPE = { "cobalt", "gold", "iron", "magnesium", "nickel", "platinum", "silicon", "silver", "stone", "uranium" };
+        //the max amount of ore to keep in the refinery
+        const double REFINERY_MAX_ORE = 2000.00;
+        //the name of the timer that triggers this script
         const string SCRIPT_TIMER_NAME = "Inventory Manager Timer";
+
         #endregion
 
         #region 
+
         ManagedCargoContainerInfo managedCargoContainerInfo;
         List<IMyTerminalBlock> managedAssemblers;
-        List<IMyTerminalBlock> managedReactors;
-        List<IMyTerminalBlock> managedRefineries;
+
         #endregion
 
         void Main()
@@ -32,8 +47,6 @@ namespace SpaceEngineersInventoryManager
             //init the info
             managedCargoContainerInfo = new ManagedCargoContainerInfo();
             managedAssemblers = new List<IMyTerminalBlock>();
-            managedReactors = new List<IMyTerminalBlock>();
-            managedRefineries = new List<IMyTerminalBlock>();
 
             //build the managed cargo container info
             var itemTypeToContainerNameDict = new Dictionary<string, string>();
@@ -41,8 +54,6 @@ namespace SpaceEngineersInventoryManager
             managedCargoContainerInfo.BuildAcceptDictionary(GridTerminalSystem, itemTypeToContainerNameDict);
 
             //TODO: build the managed assembler info
-            //TODO: build the managed reactor info
-            //TODO: build the managed refinery info
 
             //clean the assemblers
             CleanAssemblers(ref managedCargoContainerInfo);
@@ -50,7 +61,11 @@ namespace SpaceEngineersInventoryManager
             //sort the items
             SortItems(ref managedCargoContainerInfo);
 
+            //distribute the uranium
+            ManageReactorUraniumLevel(ref managedCargoContainerInfo);
 
+            //distribute teh ore to the refineries
+            ManageRefineryTasks(ref managedCargoContainerInfo);
         }
 
         #region Assembly Management
@@ -117,11 +132,16 @@ namespace SpaceEngineersInventoryManager
                     {
                         maxVal = 0.50; uraniumFound = true;
                     }
-                    
-                    var CargoContainer = managedCargoContainerInfo.ItemTypeToContainerListDict["ore"].FirstOrDefault();
 
-                    if (items[i].Amount > (VRage.MyFixedPoint)maxVal && CargoContainer != null)
-                        inventory.TransferItemTo(CargoContainer.GetInventory(0), i, null, true, items[i].Amount - (VRage.MyFixedPoint)maxVal);
+                    //multiply to ensure that there is no gap in the production process.
+                    //Increase this should this still happen.
+                    maxVal *= ASSEMBLER_STOCK_MULTIPLIER;
+
+                    //find the container that stores the ingots, is not full and is functional
+                    var cargoContainer = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_Ingot"].FirstOrDefault(block => !block.GetInventory(0).IsFull && (block.IsFunctional || block.IsWorking));
+
+                    if (items[i].Amount > (VRage.MyFixedPoint)maxVal && cargoContainer != null)
+                        inventory.TransferItemTo(cargoContainer.GetInventory(0), i, null, true, items[i].Amount - (VRage.MyFixedPoint)maxVal);
                 }
             }
         }
@@ -267,7 +287,7 @@ namespace SpaceEngineersInventoryManager
                 var configVals = containerConfig.Trim().Split(new string[] { ":" }, System.StringSplitOptions.None);
                 try
                 {
-                    itemTypeToContainerNameDict.Add(configVals[0].Trim(), configVals[1].Trim());
+                    itemTypeToContainerNameDict.Add("MyObjectBuilder_" + configVals[0].Trim(), configVals[1].Trim());
                 }
                 catch (IndexOutOfRangeException)
                 {
@@ -279,11 +299,401 @@ namespace SpaceEngineersInventoryManager
 
         #endregion
 
+        #region Reactor Management
+
+        void ManageReactorUraniumLevel(ref ManagedCargoContainerInfo managedCargoContainerInfo)
+        {
+            //find all managed reactors
+            var managedReactors = new List<IMyTerminalBlock>();
+            var overstockedReactors = new Dictionary<IMyTerminalBlock, VRage.MyFixedPoint>();
+            var understockedReactors = new Dictionary<IMyTerminalBlock, VRage.MyFixedPoint>();
+            GridTerminalSystem.SearchBlocksOfName(REACTOR_MANAGED_NAME, managedReactors, block => block is IMyReactor);
+
+            //turn of the conveyor use for the managed reactors
+            foreach (var reactor in managedReactors)
+            {
+                if (reactor.GetUseConveyorSystem())
+                    reactor.GetActionWithName("UseConveyor").Apply(reactor);
+
+                //search the managed reactors for reactors that have to much or to litle uranium.
+                if (reactor.GetInventory(0).CurrentMass > (VRage.MyFixedPoint)REACTOR_MAX_URANIUM)
+                {
+                    overstockedReactors.Add(reactor, reactor.GetInventory(0).CurrentMass - (VRage.MyFixedPoint)REACTOR_MAX_URANIUM);
+                }
+                else
+                {
+                    understockedReactors.Add(reactor, (VRage.MyFixedPoint)REACTOR_MAX_URANIUM - reactor.GetInventory(0).CurrentMass);
+                }
+            }
+
+            //move the overstocked ingots to ingot containers
+            foreach (var keyValue in overstockedReactors)
+            {
+                var amount = keyValue.Value;
+                var reactor = keyValue.Key;
+
+                //find the container that stores the ingots, is not full and is functional
+                var cargoContainer = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_Ingot"].FirstOrDefault(block => !block.GetInventory(0).IsFull && (block.IsFunctional || block.IsWorking));
+                var items = reactor.GetInventory(0).GetItems();
+
+                //move the excess ingots to the container
+                for (int i = items.Count - 1; i >= 0 && amount > 0; i--)
+                {
+                    if (items[i].Amount > amount && cargoContainer != null)
+                    {
+                        cargoContainer.GetInventory(0).TransferItemTo(reactor.GetInventory(0), i, null, true, items[i].Amount - amount);
+                    }
+                    else
+                    {
+                        var itemAmount = items[i].Amount;
+                        cargoContainer.GetInventory(0).TransferItemTo(reactor.GetInventory(0), i, null, true, amount - items[i].Amount);
+                        amount -= itemAmount;
+                    }
+                }
+            }
+
+            if (understockedReactors.Count > 0)
+            {
+                //find the 'free' uranium ingots in the ingot containers
+                var uraniumContainers = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_Ingot"].Where(block => (block.IsFunctional || block.IsWorking) && HasItem(block, "MyObjectBuilder_Ingot", "Uranium"));
+
+                //loop the reactors, move the uranium to the reactor (fill up one by one)
+                foreach (var keyValue in understockedReactors)
+                {
+                    var amount = keyValue.Value;
+                    var reactor = keyValue.Key;
+
+                    //find the container that stores the ingots
+                    var containers = uraniumContainers.Where(block => (block.IsFunctional || block.IsWorking) && HasItem(block, "MyObjectBuilder_Ingot", "Uranium"));
+
+                    //there is no free uranium
+                    if (containers.Count() < 1)
+                        break;
+
+                    //loop over the containers to fill up the reactor to the quota.
+                    foreach (var container in containers)
+                    {
+                        var items = container.GetInventory(0).GetItems();
+
+                        //move the excess ingots to the container
+                        for (int i = items.Count - 1; i >= 0 && amount > 0; i--)
+                        {
+                            if (items[i].Amount > amount)
+                            {
+                                reactor.GetInventory(0).TransferItemTo(container.GetInventory(0), i, null, true, items[i].Amount - amount);
+                                //fulfilled the reactor quota
+                                break;
+                            }
+                            else
+                            {
+                                var itemAmount = items[i].Amount;
+                                reactor.GetInventory(0).TransferItemTo(container.GetInventory(0), i, null, true, amount - items[i].Amount);
+                                amount -= itemAmount;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        #endregion
+
+        #region Refinery Management
+
+        void ManageRefineryTasks(ref ManagedCargoContainerInfo managedCargoContainerInfo)
+        {
+            var noItems = new List<string>(REFINERY_PROCESS_ORETYPE);
+
+            var refineries = new List<IMyTerminalBlock>();
+            GridTerminalSystem.GetBlocksOfType<IMyRefinery>(refineries, block => block.IsFunctional || block.IsWorking);
+
+            var namedRefineries = new List<IMyRefinery>();
+            var emptyRefineries = new List<IMyRefinery>();
+
+            var acceptingList = new Dictionary<string, List<IMyRefinery>>();
+
+            foreach (var refinery in refineries)
+            {
+                if (refinery.CustomName.Contains("+") || refinery.CustomName.Contains("-") || refinery.CustomName.Contains("|"))
+                    namedRefineries.Add(refinery as IMyRefinery);
+            }
+
+            if (namedRefineries.Count == 0)
+                return;
+
+
+            foreach (var container in managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_Ore"])
+            {
+                var containerItems = container.GetInventory(0).GetItems();
+
+                // since we aren't moving anyting we can iterate forward
+                foreach (var item in containerItems)
+                {
+                    string itemSubName = item.Content.SubtypeName.ToLower();
+
+                    if (noItems.Contains(itemSubName) && item.Content.ToString().Contains("MyObjectBuilder_Ore"))
+                        noItems.Remove(itemSubName);
+                }
+            }
+
+            foreach (var refinery in namedRefineries)
+            {
+                var managedRefineryInfo = new ManagedRefineryInfo(refinery);
+
+                var refineryInv = managedRefineryInfo.Refinery.GetInventory(0);
+                var refineryItems = refineryInv.GetItems();
+
+                if (managedRefineryInfo.Refinery.UseConveyorSystem)
+                    managedRefineryInfo.Refinery.GetActionWithName("UseConveyor").Apply(managedRefineryInfo.Refinery);
+
+                if (IsEmpty(refineryInv))
+                    emptyRefineries.Add(managedRefineryInfo.Refinery);
+                else
+                    managedRefineryInfo.Refinery.GetActionWithName("OnOff_On").Apply(managedRefineryInfo.Refinery);
+
+                string[] splitName = managedRefineryInfo.Refinery.CustomName.Split(' ');
+
+                foreach (var split in splitName)
+                {
+                    if (split.Contains("+"))
+                    {
+                        string name = split.Replace("+", "").ToLower();
+                        managedRefineryInfo.AcceptList.Add(name);
+
+                    }
+                    else if (split.Contains("-"))
+                    {
+                        string name = split.Replace("-", "").ToLower();
+                        managedRefineryInfo.IgnoreList.Add(name);
+                    }
+                    else if (split.Contains("|"))
+                    {
+                        string name = split.Replace("|", "").ToLower();
+                        managedRefineryInfo.SecondaryList.Add(name);
+                    }
+                }
+
+                foreach (var missingItem in noItems)
+                {
+                    managedRefineryInfo.AcceptList.Remove(missingItem);
+                }
+
+                foreach (var item in refineryItems)
+                {
+                    string itemSubName = item.Content.SubtypeName.ToLower();
+
+                    if (managedRefineryInfo.Refinery.CustomName.Contains("+" + itemSubName))
+                    {
+                        List<IMyRefinery> list;
+                        if (!acceptingList.TryGetValue(itemSubName, out list))
+                            acceptingList.Add(itemSubName, list = new List<IMyRefinery>());
+                        AddUnique(list, managedRefineryInfo.Refinery);
+                        managedRefineryInfo.AcceptList.Add(itemSubName);
+                    }
+                }
+
+                foreach (var acceptedTypeList in managedRefineryInfo.AcceptList)
+                {
+                    List<IMyRefinery> list;
+                    if (!acceptingList.TryGetValue(acceptedTypeList, out list))
+                        acceptingList.Add(acceptedTypeList, list = new List<IMyRefinery>());
+                    AddUnique(list, managedRefineryInfo.Refinery);
+                }
+
+                if (managedRefineryInfo.AcceptList.Count == 0 && managedRefineryInfo.IgnoreList.Count > 0)
+                {
+                    foreach (var oreType in REFINERY_PROCESS_ORETYPE)
+                    {
+                        if (managedRefineryInfo.IgnoreList.Contains(oreType))
+                            continue;
+                        List<IMyRefinery> list;
+                        if (!acceptingList.TryGetValue(oreType, out list))
+                            acceptingList.Add(oreType, list = new List<IMyRefinery>());
+                        AddUnique(list, managedRefineryInfo.Refinery);
+                        managedRefineryInfo.AcceptList.Add(oreType);
+                    }
+                }
+
+                if (managedRefineryInfo.AcceptList.Count == 0)
+                {
+                    foreach (var secondaryTypeList in managedRefineryInfo.SecondaryList)
+                    {
+                        List<IMyRefinery> list;
+                        if (!acceptingList.TryGetValue(secondaryTypeList, out list))
+                            acceptingList.Add(secondaryTypeList, list = new List<IMyRefinery>());
+                        AddUnique(list, managedRefineryInfo.Refinery);
+                    }
+                }
+
+                List<IMyRefinery> allList = new List<IMyRefinery>();
+                if (acceptingList.TryGetValue("all", out allList))
+                {
+                    foreach (var allRefinery in allList)
+                    {
+                        for (int k = 0; k < REFINERY_PROCESS_ORETYPE.Length; k++)
+                        {
+                            List<IMyRefinery> list;
+                            if (!acceptingList.TryGetValue(REFINERY_PROCESS_ORETYPE[k], out list))
+                                acceptingList.Add(REFINERY_PROCESS_ORETYPE[k], list = new List<IMyRefinery>());
+                            AddUnique(list, allRefinery);
+                        }
+                    }
+                }
+
+                var containerDestination = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_Ore"].Where(block => (block.IsFunctional || block.IsWorking) && !block.GetInventory(0).IsFull).FirstOrDefault();
+
+                if (containerDestination == null)
+                    //TODO: output
+                    return;
+
+                var refineryInventory = managedRefineryInfo.Refinery.GetInventory(0);
+                refineryItems = refineryInventory.GetItems();
+
+                for (int j = refineryItems.Count - 1; j >= 0; j--)
+                {
+                    string itemSubName = refineryItems[j].Content.SubtypeName.ToLower();
+
+
+                    List<IMyRefinery> list;
+                    if (acceptingList.TryGetValue(itemSubName, out list))
+                    {
+                        if (!list.Contains(refinery))
+                        {
+                            refineryInventory.TransferItemTo(containerDestination.GetInventory(0), j, null, true, null);
+                            continue;
+                        }
+                        else
+                        {
+                            refineryInventory.TransferItemTo(containerDestination.GetInventory(0), j, null, true, refineryItems[j].Amount - (VRage.MyFixedPoint)REFINERY_MAX_ORE);
+                        }
+                    }
+                    else
+                    {
+                        refineryInventory.TransferItemTo(containerDestination.GetInventory(0), j, null, true, null);
+                        continue;
+                    }
+
+
+                    if (acceptingList.Count == 0)
+                    {
+                        refineryInventory.TransferItemTo(containerDestination.GetInventory(0), j, null, true, null);
+                    }
+                }
+            }
+
+            //move items
+            if (acceptingList.Count == 0)
+                return;
+
+            //search all ore contain
+            var orecontainers = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_Ore"].Where(block => (block.IsFunctional || block.IsWorking));
+
+            foreach (var container in orecontainers)
+            {
+                var containerInv = container.GetInventory(0);
+                var containerItems = containerInv.GetItems();
+
+                //moving items, cannot enumerate
+                for (int j = containerItems.Count - 1; j >= 0; j--)
+                {
+                    string itemSubName = containerItems[j].Content.SubtypeName.ToLower();
+
+                    if (acceptingList.ContainsKey(itemSubName) && containerItems[j].Content.ToString().Contains("Ore"))
+                    {
+                        var amount = (float)containerItems[j].Amount;
+
+                        if (amount < 1)
+                        {
+                            VRage.MyFixedPoint amountTotal = (VRage.MyFixedPoint)(amount);
+                            containerInv.TransferItemTo(acceptingList[itemSubName][0].GetInventory(0), j, null, true, amountTotal);
+                            return;
+                        }
+
+                        float total = 0;
+                        if (acceptingList[itemSubName].Count == 1)
+                            total = amount;
+                        else
+                            total = amount / acceptingList[itemSubName].Count;
+
+                        VRage.MyFixedPoint amountToMove = (VRage.MyFixedPoint)(total);
+
+                        for (int i = 0; i < acceptingList[itemSubName].Count; i++)
+                        {
+                            containerInv.TransferItemTo(acceptingList[itemSubName][i].GetInventory(0), j, null, true, amountToMove);
+                        }
+                    }
+                }
+            }
+
+            //turn of all the empty refineries
+            foreach (var refinery in emptyRefineries)
+            {
+                var emptyRefineryInv = refinery.GetInventory(0);
+                if (IsEmpty(emptyRefineryInv))
+                    refinery.GetActionWithName("OnOff_Off").Apply(refinery);
+            }
+        }
+
+        #endregion
+
         #region Util
+
+        void AddUnique<T>(List<T> list, T value)
+        {
+            if (!list.Contains(value))
+                list.Add(value);
+        }
 
         float getPercent(IMyInventory inv)
         {
             return ((float)inv.CurrentVolume / (float)inv.MaxVolume) * 100f;
+        }
+
+        bool IsEmpty(IMyInventory inv)
+        {
+            if ((float)inv.CurrentVolume > 0)
+                return false;
+            else
+                return true;
+        }
+
+        bool HasItem(IMyTerminalBlock terminalBlock, string subTypeId, string typeId)
+        {
+            if (terminalBlock.IsFunctional == false || terminalBlock.IsWorking == false)
+                return false;
+            for (int inventoryIndex = 0; inventoryIndex < terminalBlock.GetInventoryCount(); inventoryIndex++)
+            {
+                var inventory = terminalBlock.GetInventory(inventoryIndex);
+                if (GetItemAmmount(inventory, subTypeId, typeId) > 0)
+                    return true;
+
+            }
+            return false;
+        }
+
+        VRage.MyFixedPoint GetItemAmmount(IMyInventory inventory, string subTypeId, string typeId)
+        {
+            VRage.MyFixedPoint ammount = 0;
+            var items = GetItemsOfType(inventory, subTypeId, typeId);
+            for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
+            {
+                var item = items[itemIndex];
+                ammount += item.Amount;
+            }
+            return ammount;
+        }
+
+        List<IMyInventoryItem> GetItemsOfType(IMyInventory inventory, string subTypeId, string typeId)
+        {
+            var matchingItems = new List<IMyInventoryItem>();
+            var items = inventory.GetItems();
+            for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
+            {
+                var item = items[itemIndex];
+                if (item.Content.SubtypeId.ToString() == subTypeId && item.Content.TypeId.ToString() == typeId)
+                    matchingItems.Add(item);
+            }
+            return matchingItems;
         }
 
         class ManagedCargoContainerInfo
@@ -318,6 +728,22 @@ namespace SpaceEngineersInventoryManager
                         //TODO: output error
                     }
                 }
+            }
+        }
+
+        class ManagedRefineryInfo
+        {
+            public IMyRefinery Refinery { get; private set; }
+            public List<string> IgnoreList { get; private set; }
+            public List<string> AcceptList { get; private set; }
+            public List<string> SecondaryList { get; private set; }
+
+            public ManagedRefineryInfo(IMyRefinery refinery)
+            {
+                Refinery = refinery;
+                IgnoreList = new List<string>();
+                AcceptList = new List<string>();
+                SecondaryList = new List<string>();
             }
         }
 
