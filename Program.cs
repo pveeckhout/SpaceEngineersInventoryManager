@@ -44,9 +44,91 @@ namespace SpaceEngineersInventoryManager
             //TODO: build the managed reactor info
             //TODO: build the managed refinery info
 
+            //clean the assemblers
+            CleanAssemblers(ref managedCargoContainerInfo);
+
             //sort the items
             SortItems(ref managedCargoContainerInfo);
+
+
         }
+
+        #region Assembly Management
+
+        void CleanAssemblers(ref ManagedCargoContainerInfo managedCargoContainerInfo)
+        {
+            var assemblers = new List<IMyTerminalBlock>();
+            GridTerminalSystem.GetBlocksOfType<IMyAssembler>(assemblers);
+            if (assemblers == null)
+                return;
+
+            // check assemblers for clogging
+            for (var index = 0; index < assemblers.Count; index++)
+            {
+                if (assemblers[index] == null) continue;
+                var inventory = assemblers[index].GetInventory(0);
+                var items = inventory.GetItems();
+
+                //each source type should only be found once
+                bool stoneFound, ironFound, nickelFound, cobaltFound, siliconFound, magnesiumFound, silverFound, goldFound, platinumFound, uraniumFound;
+                stoneFound = ironFound = nickelFound = cobaltFound = siliconFound = magnesiumFound = silverFound = goldFound = platinumFound = uraniumFound = false;
+                var i = -1;
+                while (inventory.IsItemAt(++i))
+                { // set MaxAmount based on what it is.
+                    var maxVal = 0.00;
+
+                    if (items[i].Content.SubtypeName == "Stone" && !stoneFound)
+                    {
+                        maxVal = 10.00; stoneFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Iron" && !ironFound)
+                    {
+                        maxVal = 600.00; ironFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Nickel" && !nickelFound)
+                    {
+                        maxVal = 70.00; nickelFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Cobalt" && !cobaltFound)
+                    {
+                        maxVal = 220.00; cobaltFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Silicon" && !siliconFound)
+                    {
+                        maxVal = 15.00; siliconFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Magnesium" && !magnesiumFound)
+                    {
+                        maxVal = 5.20; magnesiumFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Silver" && !silverFound)
+                    {
+                        maxVal = 10.00; silverFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Gold" && !goldFound)
+                    {
+                        maxVal = 5.00; goldFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Platinum" && !platinumFound)
+                    {
+                        maxVal = 0.40; platinumFound = true;
+                    }
+                    if (items[i].Content.SubtypeName == "Uranium" && !uraniumFound)
+                    {
+                        maxVal = 0.50; uraniumFound = true;
+                    }
+                    
+                    var CargoContainer = managedCargoContainerInfo.ItemTypeToContainerListDict["ore"].FirstOrDefault();
+
+                    if (items[i].Amount > (VRage.MyFixedPoint)maxVal && CargoContainer != null)
+                        inventory.TransferItemTo(CargoContainer.GetInventory(0), i, null, true, items[i].Amount - (VRage.MyFixedPoint)maxVal);
+                }
+            }
+        }
+
+        #endregion
+
+        #region ItemSorting
 
         void SortItems(ref ManagedCargoContainerInfo managedCargoContainerInfo)
         {
@@ -173,6 +255,8 @@ namespace SpaceEngineersInventoryManager
         }
 
         void ParseContainerConfig(string configVal, out Dictionary<string, string> itemTypeToContainerNameDict)
+
+
         {
             itemTypeToContainerNameDict = new Dictionary<string, string>();
 
@@ -181,7 +265,8 @@ namespace SpaceEngineersInventoryManager
             foreach (var containerConfig in containerConfigs)
             {
                 var configVals = containerConfig.Trim().Split(new string[] { ":" }, System.StringSplitOptions.None);
-                try {
+                try
+                {
                     itemTypeToContainerNameDict.Add(configVals[0].Trim(), configVals[1].Trim());
                 }
                 catch (IndexOutOfRangeException)
@@ -192,6 +277,10 @@ namespace SpaceEngineersInventoryManager
 
         }
 
+        #endregion
+
+        #region Util
+
         float getPercent(IMyInventory inv)
         {
             return ((float)inv.CurrentVolume / (float)inv.MaxVolume) * 100f;
@@ -200,13 +289,13 @@ namespace SpaceEngineersInventoryManager
         class ManagedCargoContainerInfo
         {
             public Dictionary<string, List<IMyTerminalBlock>> ItemTypeToContainerListDict { get; private set; }
-            public Dictionary<string, string>  ItemTypeToContainerNameDict { get; private set; }
+            public Dictionary<string, string> ItemTypeToContainerNameDict { get; private set; }
 
             public ManagedCargoContainerInfo()
             {
                 this.ItemTypeToContainerListDict = new Dictionary<string, List<IMyTerminalBlock>>();
             }
-            
+
             public void BuildAcceptDictionary(IMyGridTerminalSystem gridTerminalSystem, Dictionary<string, string> itemTypeToContainerNameDict)
             {
                 //save the dict locally
@@ -228,8 +317,10 @@ namespace SpaceEngineersInventoryManager
                     {
                         //TODO: output error
                     }
-                }  
+                }
             }
         }
+
+        #endregion
     }
 }
