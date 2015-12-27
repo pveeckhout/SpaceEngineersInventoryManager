@@ -17,11 +17,59 @@ namespace SpaceEngineersInventoryManager
         #region Script Configuration
 
         //linking item type names to container names
-        const string CARGO_CONTAINER_CONFIG = "Ore:Ore Container;Ingot:Ingot Container;Component:Component Container;Ammo:Ammo Container;Gun:Ammo Container;";
+        readonly Dictionary<string, string> CARGO_CONTAINER_CONFIG = new Dictionary<string, string>()
+        {
+            { "Ore" , "Ore Container"},
+            { "Ingot" , "Ingot Container"},
+            { "Component" , "Component Container"},
+            { "AmmoMagazines" , "Ammo Container"},
+            { "PhysicalGunObject" , "Gun Container"}
+        };
         //this container will not be touched by the sorting algoritme
         const string CARGO_CONTAINER_LOCKED = "Locked Container;";
         //multiplier to ensure that there is no gap in the production process.
-        const int ASSEMBLER_STOCK_MULTIPLIER = 4;
+        const int ASSEMBLER_SOURCE_MULTIPLIER = 3;
+        //name of the managed assemblers
+        const string ASSEMBLER_MANAGED_NAME = "Managed Assembler";
+        //list of components to keep in stock, order of the list will determine the priority
+        readonly Dictionary<string, VRage.MyFixedPoint> ASSEMBLER_AUTOASSEMBLY_COMPONENT_LIST = new Dictionary<string, VRage.MyFixedPoint>()
+        {
+            { "BulletproofGlass", 0 },
+            { "Computer", 0 },
+            { "Construction", 0 },
+            { "Detector", 0 },
+            { "Display", 0 },
+            { "Explosives", 0 },
+            { "Girder", 0 },
+            { "GravityGenerator", 0 },
+            { "InteriorPlate", 0 },
+            { "LargeTube", 0 },
+            { "Medical", 0 },
+            { "MetalGrid", 0 },
+            { "Motor", 0 },
+            { "PowerCell", 0 },
+            { "RadioCommunication", 0 },
+            { "Reactor", 0 },
+            { "SmallTube", 0 },
+            { "SolarCell", 0 },
+            { "SteelPlate", 0 },
+            { "Thrust", 0 },
+        };
+        //list of tools to keep in stock, order of the list will determine the priority
+        readonly Dictionary<string, VRage.MyFixedPoint> ASSEMBLER_AUTOASSEMBLY_GUN_LIST = new Dictionary<string, VRage.MyFixedPoint>()
+        {
+            { "AngleGrinderItem", 0 },
+            { "AutomaticRifleItem", 0 },
+            { "HandDrillItem", 0 },
+            { "WelderItem", 0 }
+        };
+        //list of ammo to keep in stock, order of the list will determine the priority
+        readonly Dictionary<string, VRage.MyFixedPoint> ASSEMBLER_AUTOASSEMBLY_AMMO_LIST = new Dictionary<string, VRage.MyFixedPoint>()
+        {
+            { "Missile200mm", 0 },
+            { "NATO_25x184mm", 0 },
+            { "NATO_5p56x45mm", 0 }
+        };
         //the name of the managed reactors
         const string REACTOR_MANAGED_NAME = "Managed Reactor";
         //amount of uranium ingot to try to keep in each reactor
@@ -35,25 +83,15 @@ namespace SpaceEngineersInventoryManager
 
         #endregion
 
-        #region 
-
         ManagedCargoContainerInfo managedCargoContainerInfo;
-        List<IMyTerminalBlock> managedAssemblers;
-
-        #endregion
 
         void Main()
         {
             //init the info
             managedCargoContainerInfo = new ManagedCargoContainerInfo();
-            managedAssemblers = new List<IMyTerminalBlock>();
 
             //build the managed cargo container info
-            var itemTypeToContainerNameDict = new Dictionary<string, string>();
-            ParseContainerConfig(CARGO_CONTAINER_CONFIG, out itemTypeToContainerNameDict);
-            managedCargoContainerInfo.BuildAcceptDictionary(GridTerminalSystem, itemTypeToContainerNameDict);
-
-            //TODO: build the managed assembler info
+            managedCargoContainerInfo.BuildAcceptDictionary(GridTerminalSystem, CARGO_CONTAINER_CONFIG);
 
             //clean the assemblers
             CleanAssemblers(ref managedCargoContainerInfo);
@@ -64,8 +102,11 @@ namespace SpaceEngineersInventoryManager
             //distribute the uranium
             ManageReactorUraniumLevel(ref managedCargoContainerInfo);
 
-            //distribute teh ore to the refineries
+            //distribute the ore to the refineries
             ManageRefineryTasks(ref managedCargoContainerInfo);
+
+            //queue up the production
+            QueueAssemblers(ref managedCargoContainerInfo);
         }
 
         #region Assembly Management
@@ -135,13 +176,142 @@ namespace SpaceEngineersInventoryManager
 
                     //multiply to ensure that there is no gap in the production process.
                     //Increase this should this still happen.
-                    maxVal *= ASSEMBLER_STOCK_MULTIPLIER;
+                    maxVal *= ASSEMBLER_SOURCE_MULTIPLIER;
 
                     //find the container that stores the ingots, is not full and is functional
                     var cargoContainer = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_Ingot"].FirstOrDefault(block => !block.GetInventory(0).IsFull && (block.IsFunctional || block.IsWorking));
 
                     if (items[i].Amount > (VRage.MyFixedPoint)maxVal && cargoContainer != null)
                         inventory.TransferItemTo(cargoContainer.GetInventory(0), i, null, true, items[i].Amount - (VRage.MyFixedPoint)maxVal);
+                }
+            }
+        }
+
+        void QueueAssemblers(ref ManagedCargoContainerInfo managedCargoContainerInfo)
+        {
+            var managedAssemblerInfo = new ManagedAssemblerInfo();
+
+            //add all named assemblers to the info
+            GridTerminalSystem.SearchBlocksOfName(ASSEMBLER_MANAGED_NAME, managedAssemblerInfo.ManagedAssemblers, block => block is IMyAssembler);
+
+            //check how much of each item we need to make
+            foreach (var componentItem in ASSEMBLER_AUTOASSEMBLY_COMPONENT_LIST)
+            {
+                managedAssemblerInfo.ComponentsToProduce[componentItem.Key] += componentItem.Value;
+            }
+
+            foreach (var componentItem in ASSEMBLER_AUTOASSEMBLY_AMMO_LIST)
+            {
+                managedAssemblerInfo.AmmoToProduce[componentItem.Key] += componentItem.Value;
+            }
+
+            foreach (var componentItem in ASSEMBLER_AUTOASSEMBLY_GUN_LIST)
+            {
+                managedAssemblerInfo.GunsToProduce[componentItem.Key] += componentItem.Value;
+            }
+
+            //we can iterate over all items in all component containers to reduce the amount of each item we need to make
+            var containers = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_Component"];
+
+            foreach (var componentContainer in containers)
+            {
+                foreach (var item in componentContainer.GetInventory(0).GetItems())
+                {
+                    if (item.Content.ToString().Contains("MyObjectBuilder_Component"))
+                    {
+                        managedAssemblerInfo.ComponentsToProduce[item.Content.SubtypeName.ToLower()] -= item.Amount;
+                    }
+                }
+            }
+
+            //we can iterate over all items in all Ammo containers to reduce the amount of each item we need to make
+            containers = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_AmmoMagazines"];
+
+            foreach (var componentContainer in containers)
+            {
+                foreach (var item in componentContainer.GetInventory(0).GetItems())
+                {
+                    if (item.Content.ToString().Contains("MyObjectBuilder_AmmoMagazines"))
+                    {
+                        managedAssemblerInfo.AmmoToProduce[item.Content.SubtypeName.ToLower()] -= item.Amount;
+                    }
+                }
+            }
+
+            //we can iterate over all items in all Gun containers to reduce the amount of each item we need to make
+            containers = managedCargoContainerInfo.ItemTypeToContainerListDict["MyObjectBuilder_PhysicalGunObject"];
+
+            foreach (var componentContainer in containers)
+            {
+                foreach (var item in componentContainer.GetInventory(0).GetItems())
+                {
+                    if (item.Content.ToString().Contains("MyObjectBuilder_PhysicalGunObject"))
+                    {
+                        managedAssemblerInfo.GunsToProduce[item.Content.SubtypeName.ToLower()] -= item.Amount;
+                    }
+                }
+            }
+
+            //check which assemblers produce each component
+            foreach (var assemblyItem in managedAssemblerInfo.ComponentsToProduce)
+            {
+                var assemblers = managedAssemblerInfo.ManagedAssemblers.Where(block => block.CustomName.Contains("[" + assemblyItem.Key + "]"));
+
+                if (assemblyItem.Value > 0)
+                {
+                    foreach (var assembler in assemblers)
+                    {
+                        assembler.GetActionWithName("OnOff_On").Apply(assembler);
+                    }
+                }
+                else
+                {
+                    foreach (var assembler in assemblers)
+                    {
+                        assembler.GetActionWithName("OnOff_Off").Apply(assembler);
+                    }
+                }
+            }
+
+            //check which assemblers produce each ammo
+            foreach (var assemblyItem in managedAssemblerInfo.AmmoToProduce)
+            {
+                var assemblers = managedAssemblerInfo.ManagedAssemblers.Where(block => block.CustomName.Contains("[" + assemblyItem.Key + "]"));
+
+                if (assemblyItem.Value > 0)
+                {
+                    foreach (var assembler in assemblers)
+                    {
+                        assembler.GetActionWithName("OnOff_On").Apply(assembler);
+                    }
+                }
+                else
+                {
+                    foreach (var assembler in assemblers)
+                    {
+                        assembler.GetActionWithName("OnOff_Off").Apply(assembler);
+                    }
+                }
+            }
+
+            //check which assemblers produce each gun 
+            foreach (var assemblyItem in managedAssemblerInfo.GunsToProduce)
+            {
+                var assemblers = managedAssemblerInfo.ManagedAssemblers.Where(block => block.CustomName.Contains("[" + assemblyItem.Key + "]"));
+
+                if (assemblyItem.Value > 0)
+                {
+                    foreach (var assembler in assemblers)
+                    {
+                        assembler.GetActionWithName("OnOff_On").Apply(assembler);
+                    }
+                }
+                else
+                {
+                    foreach (var assembler in assemblers)
+                    {
+                        assembler.GetActionWithName("OnOff_Off").Apply(assembler);
+                    }
                 }
             }
         }
@@ -156,7 +326,7 @@ namespace SpaceEngineersInventoryManager
             {
                 var type = keyValuePair.Key;
                 var typeContainers = keyValuePair.Value;
-                var containerName = managedCargoContainerInfo.ItemTypeToContainerNameDict[keyValuePair.Key];
+                var containerName = CARGO_CONTAINER_CONFIG[keyValuePair.Key];
 
                 // if there are no containers with our specific name, nothing to do so return
                 if (typeContainers == null)
@@ -699,7 +869,6 @@ namespace SpaceEngineersInventoryManager
         class ManagedCargoContainerInfo
         {
             public Dictionary<string, List<IMyTerminalBlock>> ItemTypeToContainerListDict { get; private set; }
-            public Dictionary<string, string> ItemTypeToContainerNameDict { get; private set; }
 
             public ManagedCargoContainerInfo()
             {
@@ -708,9 +877,6 @@ namespace SpaceEngineersInventoryManager
 
             public void BuildAcceptDictionary(IMyGridTerminalSystem gridTerminalSystem, Dictionary<string, string> itemTypeToContainerNameDict)
             {
-                //save the dict locally
-                this.ItemTypeToContainerNameDict = itemTypeToContainerNameDict;
-
                 foreach (var keyValuePair in itemTypeToContainerNameDict)
                 {
                     var containers = new List<IMyTerminalBlock>();
@@ -744,6 +910,67 @@ namespace SpaceEngineersInventoryManager
                 IgnoreList = new List<string>();
                 AcceptList = new List<string>();
                 SecondaryList = new List<string>();
+            }
+        }
+
+        class ManagedAssemblerInfo
+        {
+            public List<IMyTerminalBlock> ManagedAssemblers { get; private set; }
+            public List<IMyTerminalBlock> ComponentAssemblers { get; private set; }
+            public List<IMyTerminalBlock> GunsAssemblers { get; private set; }
+            public List<IMyTerminalBlock> AmmoAssemblers { get; private set; }
+
+            public Dictionary<string, VRage.MyFixedPoint> ComponentsToProduce { get; private set; }
+            //list of tools to keep in stock, order of the list will determine the priority
+            public Dictionary<string, VRage.MyFixedPoint> GunsToProduce { get; private set; }
+            //list of ammo to keep in stock, order of the list will determine the priority
+            public Dictionary<string, VRage.MyFixedPoint> AmmoToProduce { get; private set; }
+
+            public ManagedAssemblerInfo()
+            {
+                this.ManagedAssemblers = new List<IMyTerminalBlock>();
+                this.ComponentAssemblers = new List<IMyTerminalBlock>();
+                this.GunsAssemblers = new List<IMyTerminalBlock>();
+                this.AmmoAssemblers = new List<IMyTerminalBlock>();
+
+                this.ComponentsToProduce = new Dictionary<string, VRage.MyFixedPoint>()
+                {
+                    { "BulletproofGlass", 0 },
+                    { "Computer", 0 },
+                    { "Construction", 0 },
+                    { "Detector", 0 },
+                    { "Display", 0 },
+                    { "Explosives", 0 },
+                    { "Girder", 0 },
+                    { "GravityGenerator", 0 },
+                    { "InteriorPlate", 0 },
+                    { "LargeTube", 0 },
+                    { "Medical", 0 },
+                    { "MetalGrid", 0 },
+                    { "Motor", 0 },
+                    { "PowerCell", 0 },
+                    { "RadioCommunication", 0 },
+                    { "Reactor", 0 },
+                    { "SmallTube", 0 },
+                    { "SolarCell", 0 },
+                    { "SteelPlate", 0 },
+                    { "Thrust", 0 },
+                };
+
+                this.GunsToProduce = new Dictionary<string, VRage.MyFixedPoint>()
+                {
+                    { "AngleGrinderItem", 0 },
+                    { "AutomaticRifleItem", 0 },
+                    { "HandDrillItem", 0 },
+                    { "WelderItem", 0 }
+                };
+
+                this.AmmoToProduce = new Dictionary<string, VRage.MyFixedPoint>()
+                {
+                    { "Missile200mm", 0 },
+                    { "NATO_25x184mm", 0 },
+                    { "NATO_5p56x45mm", 0 }
+                };
             }
         }
 
