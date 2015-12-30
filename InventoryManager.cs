@@ -6,9 +6,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace SpaceEngineersInventoryManager
+namespace SpaceEngineersScripts
 {
-    class Program
+    class InventoryManager : TestingFramework.TestProgrammableBlock
     {
         #region programming environment essential inits, DO NOT COPY TO GAME
         IMyGridTerminalSystem GridTerminalSystem;
