@@ -94,12 +94,6 @@
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\ConsoleApplication1\SpaceEngineersScripts.TestingFramework.csproj">
-      <Project>{f15ce059-1c2b-4c57-9a18-683f336c606d}</Project>
-      <Name>SpaceEngineersScripts.TestingFramework</Name>
-    </ProjectReference>
-  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

@@ -1,4 +1,5 @@
 ﻿using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,23 +44,72 @@ namespace SpaceEngineersScripts
             if (toStart)
             {
                 ToStart();
+                return;
             }
+
+            if (safetyRounds)
+            {
+                SafetyRounds();
+            }
+        }
+
+        private void SafetyRounds()
+        {
+            throw new NotImplementedException();
         }
 
         private void ToStart()
         {
-            //TODO: when the rotor is turning, stop it
+            bool working = false;
+            //When the rotor is turning, stop it
+            Rotor.SetValueFloat("Velocity", 0f);
 
-            //TODO: if the drills ar not on, turn on
+            //If the drills ar not on, turn on
+            foreach (var drill in Drills)
+            {
+                drill.GetActionWithName("OnOff_On").Apply(drill);
+            }
 
-            //TODO: while the vPistons are not retracted, retract
+            //While the vPistons are not retracted, retract
+            if (!working)
+            {
+                foreach (var piston in VerticalPistons)
+                {
 
-            //TODO: when the vPistons are retracted, retract the hPiston
+                    if (piston.CurrentPosition > 0)
+                    {
+                        working = true;
+                        piston.SetValueFloat("MinLimit", 0f);
+                        piston.SetValueFloat("MaxLimit", 0f);
+                        piston.SetValueFloat("Velocity", -1f);
+                    }
+                }
+            }
+            //if working, stop method
+            if (working)
+            {
+                return;
+            }
+
+            //When the vPistons are retracted, retract the hPiston
+            if (HorizontalPiston.CurrentPosition > 0)
+            {
+                working = true;
+                HorizontalPiston.SetValueFloat("MinLimit", 0f);
+                HorizontalPiston.SetValueFloat("MaxLimit", 0f);
+                HorizontalPiston.SetValueFloat("Velocity", -1f);
+            }
+            //if working, stop method
+            if (working)
+            {
+                return;
+            }
 
             //when the hPiston is retracted end to start and begin safety rounds
-            toStart = false;
+            toStart = working;
             //safetyRounds has been set to true during Init()
             //safetyRounds = true;
+
         }
 
         private void Init()

@@ -5,8 +5,6 @@ VisualStudioVersion = 14.0.24720.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpaceEngineersScripts", "SpaceEngineersScripts.csproj", "{AEF781CF-2ADB-437A-A757-C6BBD5155B29}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpaceEngineersScripts.TestingFramework", "..\ConsoleApplication1\SpaceEngineersScripts.TestingFramework.csproj", "{F15CE059-1C2B-4C57-9A18-683F336C606D}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -17,10 +15,6 @@ Global
 		{AEF781CF-2ADB-437A-A757-C6BBD5155B29}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AEF781CF-2ADB-437A-A757-C6BBD5155B29}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AEF781CF-2ADB-437A-A757-C6BBD5155B29}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F15CE059-1C2B-4C57-9A18-683F336C606D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{F15CE059-1C2B-4C57-9A18-683F336C606D}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F15CE059-1C2B-4C57-9A18-683F336C606D}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{F15CE059-1C2B-4C57-9A18-683F336C606D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
