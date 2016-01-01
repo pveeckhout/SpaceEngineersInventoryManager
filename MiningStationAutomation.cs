@@ -28,7 +28,7 @@ namespace SpaceEngineersScripts
         const string ANTENNA_NAME = "Antenna";
         const string OUTPUTPANEL_NAME = "Output Panel";
         const string IRONEXTRACTOR_NAME = "Iron Extractor";
-        const string CARGOCONTAINER_NAME = "Carge Container";
+        const string CARGOCONTAINER_NAME = "Large Cargo Container";
         #endregion
 
         private IMyPistonBase HorizontalPiston { get; set; }
@@ -72,7 +72,7 @@ namespace SpaceEngineersScripts
             Drill();
 
             //TODO: move items from iron extractor to the container to prevent 'clogs'
-            CLeanIronExtractor();
+            /*CLeanIronExtractor();
         }
 
         private void CLeanIronExtractor()
@@ -87,7 +87,7 @@ namespace SpaceEngineersScripts
                 {
                     ironExtractorOutputInventory.TransferItemTo(CargoContainer.GetInventory(0), i);
                 }
-            }
+            }*/
         }
 
         private void Drill()
