@@ -18,7 +18,7 @@ namespace SpaceEngineersScripts
         //OPERATIONAL
         const float ROTOR_RPM = 0.5f;
         const float DRILL_DOWN_SPEED = 0.006f;
-        readonly List<float> DRILL_RADII = new List<float>() { 0, 5, 10 };
+        readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
         //BLOCK SETUP
@@ -27,6 +27,8 @@ namespace SpaceEngineersScripts
         const string V_PISTON_NAME = "Vertical Piston";
         const string ANTENNA_NAME = "Antenna";
         const string OUTPUTPANEL_NAME = "Output Panel";
+        const string IRONEXTRACTOR_NAME = "Iron Extractor";
+        const string CARGOCONTAINER_NAME = "Carge Container";
         #endregion
 
         private IMyPistonBase HorizontalPiston { get; set; }
@@ -35,15 +37,22 @@ namespace SpaceEngineersScripts
         private IMyMotorAdvancedStator Rotor { get; set; }
         private IMyRadioAntenna Antenna { get; set; }
         private IMyTextPanel OutputPanel { get; set; }
+        private IMyRefinery IronExtractor { get; set; }
+        private IMyCargoContainer CargoContainer { get; set; }
+
 
         private bool toStart = false;
         private int currentCircle = 0;
         private bool safetyRounds = false;
-        private bool afteyRoundsFirstPass = false;
+        private string initArgs;
 
+        //TODO: output status
         void Main(string argument)
         {
-            if (!(HorizontalPiston != null && VerticalPistons != null && Drills != null && Rotor != null && Antenna != null && OutputPanel != null))
+            initArgs = argument;
+
+            //check if all blocks are initialized
+            if (!(HorizontalPiston != null && VerticalPistons != null && Drills != null && Rotor != null && Antenna != null && OutputPanel != null && IronExtractor != null && CargoContainer != null))
             {
                 Init();
             }
@@ -61,87 +70,162 @@ namespace SpaceEngineersScripts
             }
 
             Drill();
+
+            //TODO: move items from iron extractor to the container to prevent 'clogs'
+            CLeanIronExtractor();
+        }
+
+        private void CLeanIronExtractor()
+        {
+            var ironExtractorOutputInventory = IronExtractor.GetInventory(1);
+            var cargoContainerInventory = CargoContainer.GetInventory(0);
+
+            for (int i = ironExtractorOutputInventory.GetItems().Count -1; i >= 0; i--)
+            {
+                var item = ironExtractorOutputInventory.GetItems()[1];
+                if (cargoContainerInventory.CanItemsBeAdded(item.Amount, item.GetDefinitionId()))
+                {
+                    ironExtractorOutputInventory.TransferItemTo(CargoContainer.GetInventory(0), i);
+                }
+            }
         }
 
         private void Drill()
         {
-            //TODO:
+            ClearOutput();
+            //check for init  conditions
+            if (currentCircle < 0)
+            {
+                OutputToPanel("Drill sequece, init");
+                //move to the start position
+                ToStart();
+
+                //if to start is false, the we are at the starting position, set the current index to 0
+                if (!toStart)
+                {
+                    currentCircle = 0;
+
+                    SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
+
+                    //Move the horizontal piston to the circle defined
+                    MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
+
+                    //start the rotor
+                    setRotorSpeed(ROTOR_RPM);
+
+                    OutputToPanel("Drill sequece init done");
+                }
+            }
+
+            if (currentCircle < DRILL_RADII.Count)
+            {
+                bool maxDepthReached = true;
+
+                //TODO: drill each radius to max depth
+                foreach (var piston in VerticalPistons)
+                {
+                    MovePistonToPosition(piston, 10, (float)DRILL_DOWN_SPEED / (float)VerticalPistons.Count);
+                    if (piston.CurrentPosition != 10)
+                    {
+                        OutputToPanel("All pistons did not reach max depth yet");
+                        maxDepthReached &= false;
+                    }
+                }
+
+                if (maxDepthReached)
+                {
+                    OutputToPanel("All pistons did reach max depth, returning to start position");
+                    ToStart(++currentCircle);
+                }
+
+            }
+            else {
+                OutputToPanel("Drill sequece, closure");
+                //move to the start position
+                ToStart();
+
+                //if to start is false, the we are at the starting position, turn off all unneeded devices to concerve energy
+                if (!toStart)
+                {
+                    SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
+                    OutputToPanel("Drill sequece done");
+
+                    //TODO: turn off everything nonvital
+                }
+            }
         }
 
         private void SafetyRounds()
         {
-            //clear the output
+            //clear the output screen
             ClearOutput();
 
             if (DEBUG)
-                OutputToPanel("Started drilling the Safty rounds");
+            {
+                OutputToPanel("Drilling the Safty rounds");
+            }
 
             var currentRotorposition = GetRotorPosition();
-            if (DEBUG)
-                OutputToPanel("CurrentRotorposition: " + currentRotorposition);
 
-            //Move the horizontal piston to the circle defined
-            MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
-            // set the rotor limit to 1 circle
-            SetRotorLimits(0, 720);
-
-            //turn the rotor to zero to start on first pass
-            if (afteyRoundsFirstPass)
+            //turn the rotor to zero to if the current circle is -1
+            if (currentCircle < 0)
             {
-                Rotor.SetValueFloat("Velocity", -ROTOR_RPM);
-                afteyRoundsFirstPass = false;
+                //debug outs happen in the method
+                MoveRotorToPosition(0);
             }
 
+            /*start a new circle
+            *
+            * if the rotor position is 0 start a new circle by
+            * 1) incrementing the current circle (first pass will invrement from -1 to 0)
+            * 2) moving the hPiston to the respective position
+            * 3) reversing the rotor so the the radius gets drilled the first time
+            *
+            * We need to check to prevent en index out of bounds. if that woudl happen, then we end the safety rounds.
+            */
             if (currentRotorposition == 0)
             {
-                if (currentCircle % 2 == 0)
+                currentCircle++;
+
+                //if current circle > circles defined go to back to start and safty cricles are done
+                if (currentCircle > DRILL_RADII.Count)
                 {
-                    //do even circle
+                    //set the safety rounds to false as we are done
+                    safetyRounds = false;
+
+                    //set the current position back to -1 (init state of each step)
+                    currentCircle = -1;
+
+                    //stop the rotor
+                    setRotorSpeed(0f);
+
+                    //Move the horizontal piston to the start circle
+                    MovePistonToPosition(HorizontalPiston, DRILL_RADII[0]);
+
                     if (DEBUG)
-                        OutputToPanel("do even safety circle");
-                    Rotor.SetValueFloat("Velocity", ROTOR_RPM);
+                        OutputToPanel("Ended Safety Cricles");
+
+                    return;
                 }
-                else
-                {
-                    if (DEBUG)
-                        OutputToPanel("reached end of uneven circle, increasing count");
-                    currentCircle++;
-                }
+
+                //Move the horizontal piston to the circle defined
+                MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
+
+                setRotorSpeed(ROTOR_RPM);
             }
-            else if (currentRotorposition == 720)
+
+            //reverse the drills so the radius gets drilled the second time
+            if (currentRotorposition == 360)
             {
-                if (currentCircle % 2 != 0)
-                {
-                    //do uneven circle 
-                    if (DEBUG)
-                        OutputToPanel("do uneven safety circle");
-                    Rotor.SetValueFloat("Velocity", -ROTOR_RPM);
-                }
-                else
-                {
-                    if (DEBUG)
-                        OutputToPanel("reached end of even circle, increasing count");
-                    currentCircle++;
-                }
+                setRotorSpeed(-ROTOR_RPM);
             }
 
             if (DEBUG)
                 OutputToPanel(string.Format("currentCircle: {0}", currentCircle));
-
-            //if current circle > circles defined go to back to start and safty cricles are done
-            if (currentCircle > DRILL_RADII.Count)
-            {
-                if (DEBUG)
-                    OutputToPanel("Ended Safety Cricles");
-                ToStart();
-                safetyRounds = false;
-            }
         }
 
-        private void ToStart()
+        private void ToStart(int targetCurrentCircle = -1)
         {
-            ClearOutput();
-
             if (DEBUG)
                 OutputToPanel("setting up starting conditions");
 
@@ -149,7 +233,8 @@ namespace SpaceEngineersScripts
             //When the rotor is turning, stop it
             if (DEBUG)
                 OutputToPanel("Setting  Rotor speed to 0RPM");
-            Rotor.SetValueFloat("Velocity", 0f);
+
+            setRotorSpeed(0f);
 
             //If the drills ar not on, turn on
             foreach (var drill in Drills)
@@ -221,13 +306,17 @@ namespace SpaceEngineersScripts
             if (DEBUG)
                 OutputToPanel(string.Format("reached end of Init() work in progress: {0}", working));
 
+            if (!working)
+            {
+                if (DEBUG)
+                    OutputToPanel(string.Format("setting current step to: {0}", targetCurrentCircle));
+                //set the current circle, defaul -1 (init state of each step)
+                currentCircle = targetCurrentCircle;
+            }
+
+
             //when the hPiston is retracted end to start and begin safety rounds
             toStart = working;
-            //safetyRounds has been set to true during Init()
-            //safetyRounds = true;
-            //set firstpass on safety rounds tre
-            afteyRoundsFirstPass = true;
-
         }
 
         private void Init()
@@ -249,6 +338,8 @@ namespace SpaceEngineersScripts
             Drills = new List<IMyShipDrill>();
             Rotor = GridTerminalSystem.GetBlockWithName(ROTOR_NAME) as IMyMotorAdvancedStator;
             Antenna = GridTerminalSystem.GetBlockWithName(ANTENNA_NAME) as IMyRadioAntenna;
+            IronExtractor = GridTerminalSystem.GetBlockWithName(IRONEXTRACTOR_NAME) as IMyRefinery;
+            CargoContainer = GridTerminalSystem.GetBlockWithName(CARGOCONTAINER_NAME) as IMyCargoContainer;
 
             if (FORCEROTOR_TORQUE)
                 ForceRotorsTorque();
@@ -300,7 +391,7 @@ namespace SpaceEngineersScripts
             {
                 OutputToPanel("ERROR: The main rotor position could not parsed");
                 OutputToPanel("ERROR: script stopped");
-                throw new FormatException("The main rotor position could not parsed");
+                throw new FormatException("The rotor position could not parsed");
             }
             return float.Parse(currentposition);
         }
@@ -334,22 +425,22 @@ namespace SpaceEngineersScripts
             //move the rotor to within the limits
             if (currentPosition == destinationPosition)
             {
-                Rotor.SetValueFloat("Velocity", 0f);
+                setRotorSpeed(0f);
                 Rotor.GetActionWithName("OnOff_Off").Apply(Rotor); // Stop rotor
                 if (DEBUG)
                     OutputToPanel("position reached, turning off");
             }
             else if (currentPosition < destinationPosition)
             {
-                Rotor.GetActionWithName("OnOff_On").Apply(Rotor); // Start rotor 
-                Rotor.SetValueFloat("Velocity", ROTOR_RPM);
-                OutputToPanel("Rotor - currentPosition < destinationPosition ==> rotorspeed: " + -ROTOR_RPM + " RPM");
+                Rotor.GetActionWithName("OnOff_On").Apply(Rotor); // Start rotor
+                OutputToPanel("Rotor - currentPosition < destinationPosition");
+                setRotorSpeed(ROTOR_RPM);
             }
             else if (currentPosition > destinationPosition)
             {
                 Rotor.GetActionWithName("OnOff_On").Apply(Rotor); // Start rotor 
-                Rotor.SetValueFloat("Velocity", -ROTOR_RPM);
-                OutputToPanel("Rotor - currentPosition > destinationPosition ==> rotorspeed: " + ROTOR_RPM + " RPM");
+                OutputToPanel("Rotor - currentPosition > destinationPosition");
+                setRotorSpeed(-ROTOR_RPM);
             }
         }
 
@@ -366,6 +457,15 @@ namespace SpaceEngineersScripts
             Rotor.SetValueFloat("UpperLimit", upper);
         }
 
+        private void setRotorSpeed(float rpm)
+        {
+            if (DEBUG)
+                OutputToPanel(string.Format("Setting Rotor speed to: {0}", rpm));
+
+            Rotor.SetValueFloat("Velocity", rpm);
+            Rotor.GetActionWithName("OnOff_On").Apply(Rotor); // Start rotor
+        }
+
         private void RemoveRotorLimits()
         {
             if (DEBUG)
@@ -374,7 +474,7 @@ namespace SpaceEngineersScripts
             SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
         }
 
-        private void MovePistonToPosition(IMyPistonBase piston, float destPosition)
+        private void MovePistonToPosition(IMyPistonBase piston, float destPosition, float speed = 0.5f)
         {
             if (DEBUG)
             {
@@ -386,11 +486,11 @@ namespace SpaceEngineersScripts
 
             if (piston.CurrentPosition > destPosition)
             {
-                piston.SetValueFloat("Velocity", -0.5f);
+                piston.SetValueFloat("Velocity", -speed);
             }
             else
             {
-                piston.SetValueFloat("Velocity", 0.5f);
+                piston.SetValueFloat("Velocity", speed);
             }
         }
     }
