@@ -38,7 +38,7 @@ namespace SpaceEngineersScripts
         const string V_PISTON_NAME = "Vertical Piston";
         const string DRILL_STATION_NAME = "Drill Station";
         const string DEBUG_PANEL_NAME = "Debug Panel";
-        const float TARGET_DEPTH = 0.075f;
+        const float TARGET_DEPTH = 20f;
         #endregion
 
         private IMyPistonBase HorizontalPiston { get; set; }
@@ -51,76 +51,74 @@ namespace SpaceEngineersScripts
         private List<IMyTerminalBlock> CargoContainers { get; set; }
 
 
-        private bool toStart = false;
+        private bool movingToPosition = false;
         private int currentCircle = -1;
         private bool initflattening = false;
         private bool endflattening = false;
         private bool drillingDone = false;
         private Dictionary<string, string> initArgs;
 
-        //TODO: do 2 full circles at max depth at each radius
+        //TODO: fix drill index issue;
+        //TODO do end flattening
         void Main(string argument)
         {
-            try
+            //check if all blocks are initialized
+            if (!(HorizontalPiston != null && VerticalPistons != null && Drills != null && Rotor != null))
             {
-                //check if all blocks are initialized
-                if (!(HorizontalPiston != null && VerticalPistons != null && Drills != null && Rotor != null))
-                {
-                    Init(argument);
-                }
-
-                if (toStart)
-                {
-                    ToStart();
-                    return;
-                }
-
-                if (initflattening)
-                {
-                    FlatteninCircles();
-                    return;
-                }
-
-                if (!drillingDone)
-                {
-                    if (!toStart)
-                        Drill();
-
-                    CLeanRefineries();
-                }
-                else
-                {
-                    if (endflattening)
-                    {
-                        FlatteninCircles(TARGET_DEPTH);
-                        return;
-                    }
-                    else {
-                        ToStart();
-                        if (!toStart)
-                            Shutdown();
-                    }
-                }
+                Init(argument);
             }
-            catch (Exception e)
+
+            if (movingToPosition)
             {
-                ClearDebug();
-                OutputToDebug(string.Format("EXCEPTION:\n{0}", e.Message));
-                OutputToDebug(e.StackTrace);
+                ToCurrentCircleDrillRadiusStartPosition();
+                return;
+            }
+
+            if (initflattening)
+            {
+                FlatteninCircles();
+                return;
+            }
+
+            if (!drillingDone)
+            {
+                if (!movingToPosition)
+                    Drill();
+
+                CLeanRefineries();
+            }
+            else
+            {
+                if (endflattening)
+                {
+                    FlatteninCircles(TARGET_DEPTH);
+                    //the we are doen with the endflattening
+                    if (currentCircle < 0)
+                    {
+                        endflattening = false;
+                    }
+                        
+                    return;
+                }
+                else {
+                    currentCircle = -1;
+                    ToCurrentCircleDrillRadiusStartPosition();
+                    if (!movingToPosition)
+                        Shutdown();
+                }
             }
         }
 
-        private void Shutdown()
+        void Shutdown()
         {
             //clean the refineries input and output and stop them
             CLeanRefineries(0);
             CLeanRefineries(1);
-            foreach (var refinery in Refineries)
-                refinery.GetActionWithName("OnOff_Off").Apply(refinery);
+
+            Refineries.ForEach(refinery => refinery.GetActionWithName("OnOff_Off").Apply(refinery));
 
             //turn off drills
-            foreach (var drill in Drills)
-                drill.GetActionWithName("OnOff_Off").Apply(drill);
+            Drills.ForEach(drill => drill.GetActionWithName("OnOff_Off").Apply(drill));
 
             //stop and turn of rotor
             setRotorSpeed(0f);
@@ -128,30 +126,24 @@ namespace SpaceEngineersScripts
 
             //turn off pistons
             HorizontalPiston.GetActionWithName("OnOff_Off").Apply(HorizontalPiston);
-            foreach (var piston in VerticalPistons)
-                piston.GetActionWithName("OnOff_Off").Apply(piston);
+            VerticalPistons.ForEach(piston => piston.GetActionWithName("OnOff_Off").Apply(piston));
 
             //turn off the debug panels
             if (OutputPanels != null)
-            {
-                foreach (var panel in OutputPanels)
-                    panel.GetActionWithName("OnOff_Off").Apply(panel);
-            }
+                OutputPanels.ForEach(panel => panel.GetActionWithName("OnOff_Off").Apply(panel));
 
             SetStatusToAntenna("DONE", false, false);
 
-            //TODO: turn off timers
+            //turn off timers
             var timers = new List<IMyTerminalBlock>();
             GridTerminalSystem.GetBlocksOfType<IMyTimerBlock>(timers);
+            timers.ForEach(timer => timer.GetActionWithName("OnOff_Off").Apply(timer));
 
-            foreach (var timer in timers)
-                timer.GetActionWithName("OnOff_Off").Apply(timer);
-
-            //TODO: turn off self
+            //turn off self
             Me.GetActionWithName("OnOff_Off").Apply(Me);
         }
 
-        private void CLeanRefineries(int refineryTargetInventoryIndex = 1)
+        void CLeanRefineries(int refineryTargetInventoryIndex = 1)
         {
             ClearDebug();
 
@@ -201,27 +193,24 @@ namespace SpaceEngineersScripts
             OutputToDebug("cleaning refineries ended");
         }
 
-        private void Drill()
+        void Drill()
         {
             ClearDebug();
 
             //check for init  conditions
             if (currentCircle < 0)
             {
-                SetStatusToAntenna("DRILL-INIT");
+                SetStatusToAntenna("DRILLING-INIT");
 
                 if (DEBUG)
                     OutputToDebug("Drill sequece, init");
 
                 //move to the start position
-                ToStart();
+                ToCurrentCircleDrillRadiusStartPosition();
 
                 //if to start is false, the we are at the starting position, set the current index to 0
-                if (!toStart)
+                if (!movingToPosition)
                 {
-
-                    SetStatusToAntenna("DRILL-INIT tostart = " + toStart);
-
                     //ínit is done
                     currentCircle = 0;
 
@@ -243,17 +232,17 @@ namespace SpaceEngineersScripts
             }
             else
             {
-                SetStatusToAntenna("DRILL");
+                Echo(string.Format("staring drilling circle {0}/{1}, do currentCurcle++ and performing ToStart()", currentCircle + 1, DRILL_RADII.Count));
 
-                if (!(currentCircle >= DRILL_RADII.Count))
+                if (currentCircle < DRILL_RADII.Count)
                 {
+                    SetStatusToAntenna(string.Format("DRILLING {0}/{1}", currentCircle + 1, DRILL_RADII.Count));
+
                     //start the rotor
                     setRotorSpeed(ROTOR_RPM);
 
                     if (DEBUG)
                         OutputToDebug(string.Format("Drilling circle {0}", currentCircle));
-
-                    SetStatusToAntenna(string.Format("DRILL[{0}/{1}]", currentCircle, DRILL_RADII.Count));
 
                     //Move the horizontal piston to the circle defined
                     if (DEBUG)
@@ -269,34 +258,36 @@ namespace SpaceEngineersScripts
 
                     if (TARGET_DEPTH <= GetPistonsTotalPosition(VerticalPistons))
                     {
-                        SetStatusToAntenna(string.Format("DRILL-[{0}/{1}]-DONE", currentCircle, DRILL_RADII.Count));
                         if (DEBUG)
                             OutputToDebug("All pistons reached max depth, returning to start position");
 
-                        SetStatusToAntenna(string.Format("DRILL-[{0}/{1}]-DONE doing ToPosition", currentCircle, DRILL_RADII.Count, currentCircle));
-
-                        ToPosition(DRILL_RADII[currentCircle], 0, GetRotorPosition());
+                        Echo(string.Format("Done drilling circle {0}/{1}, do currentCurcle++ and performing ToStart()", currentCircle + 1, DRILL_RADII.Count));
 
                         currentCircle++;
 
-                        SetStatusToAntenna(string.Format("DRILL-[{0}/{1}] incremented current circle", currentCircle, DRILL_RADII.Count, currentCircle));
-
-                        SetStatusToAntenna(string.Format("DRILL-[{0}/{1}] setting up", currentCircle, DRILL_RADII.Count, currentCircle));
-
+                        if (!(currentCircle >= DRILL_RADII.Count))
+                        {
+                            ToCurrentCircleDrillRadiusStartPosition();
+                        }
                     }
                 }
-                else {
-                    SetStatusToAntenna("DRILL-DONE");
-
+                else
+                {
                     OutputToDebug("Drill sequece, closure");
+                    SetStatusToAntenna(string.Format("DRILLING-END"));
+
+                    Echo(string.Format("Done drilling, move to position [0,0,0]"));
                     //move to the start position
-                    ToStart();
+                    ToPosition(0, 0, 0);
 
                     //if to start is false, the we are at the starting position, turn off all unneeded devices to concerve energy
-                    if (!toStart)
+                    if (!movingToPosition)
                     {
+                        Echo(string.Format("Done drilling, move to start of current circle -1"));
                         SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
                         OutputToDebug("Drill sequece done");
+
+                        currentCircle = -1;
 
                         //TODO: turn off everything nonvital
                         drillingDone = true;
@@ -305,7 +296,7 @@ namespace SpaceEngineersScripts
             }
         }
 
-        private void FlatteninCircles(float depth = 0f)
+        void FlatteninCircles(float depth = 0f)
         {
             //clear the output screen
             ClearDebug();
@@ -327,7 +318,7 @@ namespace SpaceEngineersScripts
                     OutputToDebug("init flattening rounds, moving rotor to start");
 
                 //debug outs happen in the method
-                MoveRotorToPosition(-180f, 15f);
+                MoveRotorToPosition(-180f);
 
                 MovePistonToPosition(VerticalPistons, depth);
             }
@@ -360,7 +351,7 @@ namespace SpaceEngineersScripts
                 //if current circle > circles defined go to back to start and safty circles are done
                 if (currentCircle >= DRILL_RADII.Count)
                 {
-                    //set the safety rounds to false as we are done
+                    //set the safety rounds to false as we are done and never will have to do it again
                     initflattening = false;
 
                     //set the current position back to -1 (init state of each step)
@@ -384,20 +375,20 @@ namespace SpaceEngineersScripts
 
                 MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
 
-                setRotorSpeed(ROTOR_RPM * 30f);
+                setRotorSpeed(ROTOR_RPM);
             }
 
             //reverse the drills so the radius gets drilled the second time
             if (currentRotorposition >= 180 && depth == GetPistonsTotalPosition(VerticalPistons))
             {
-                setRotorSpeed(-ROTOR_RPM * 30f);
+                setRotorSpeed(-ROTOR_RPM);
             }
 
             if (DEBUG)
                 OutputToDebug(string.Format("currentCircle: {0}", currentCircle));
         }
 
-        private bool ToPosition(float width, float depth, float rotattion)
+        bool ToPosition(float width, float depth, float rotation)
         {
             bool working = false;
 
@@ -405,7 +396,7 @@ namespace SpaceEngineersScripts
 
             if (DEBUG)
             {
-                OutputToDebug(string.Format("moving to position width: {0}, depth: {1}, rotation: {2}", width, depth, rotattion));
+                OutputToDebug(string.Format("moving to position width: {0}, depth: {1}, rotation: {2}", width, depth, rotation));
                 OutputToDebug(string.Format("Action in progress: {0}", working));
                 OutputToDebug("stopping rotor and turning on drills");
             }
@@ -413,10 +404,7 @@ namespace SpaceEngineersScripts
             setRotorSpeed(0f);
 
             //If the drills ar not on, turn on
-            foreach (var drill in Drills)
-            {
-                drill.GetActionWithName("OnOff_On").Apply(drill);
-            }
+            Drills.ForEach(drill => drill.GetActionWithName("OnOff_On").Apply(drill));
 
             if (DEBUG)
                 OutputToDebug(string.Format("Action in progress: {0}", working));
@@ -451,51 +439,37 @@ namespace SpaceEngineersScripts
                 return working;
 
             //move rotor to position
-            if (GetRotorPosition() != rotattion)
+            if (GetRotorPosition() != rotation)
             {
-                MoveRotorToPosition(rotattion);
+                MoveRotorToPosition(rotation);
                 working = true;
             }
 
             if (DEBUG)
                 OutputToDebug(string.Format("reached end of ToPosition, work in progress: {0}", working));
 
-            return working;
+            movingToPosition = working;
+
+            return movingToPosition;
         }
 
-        private void ToStart(int targetCurrentCircle = -1)
+        void ToCurrentCircleDrillRadiusStartPosition()
         {
             var working = false;
 
-            SetStatusToAntenna("DEBUG TO_START, init targetCircle" + targetCurrentCircle);
-
-            if (targetCurrentCircle > -1)
+            if (currentCircle > -1)
             {
-                working = ToPosition(DRILL_RADII[targetCurrentCircle], 0, 0);
+                working = ToPosition(DRILL_RADII[currentCircle], 0, 0);
             }
             else
             {
                 working = ToPosition(0, 0, 0);
             }
 
-            SetStatusToAntenna("DEBUG TO_START, working: " + working);
-
-            if (!working)
-            {
-                if (DEBUG)
-                    OutputToDebug(string.Format("setting current step to: {0}", targetCurrentCircle));
-                //set the current circle, defaul -1 (init state of each step)
-
-                SetStatusToAntenna("DEBUG TO_START NOT WORKING, SETTING currentCircle " + currentCircle);
-                currentCircle = targetCurrentCircle;
-            }
-
-
-            //when the hPiston is retracted end to start and begin safety rounds
-            toStart = working;
+            movingToPosition = working;
         }
 
-        private void Init(string argument)
+        void Init(string argument)
         {
             if (DEBUG)
             {
@@ -521,7 +495,7 @@ namespace SpaceEngineersScripts
             //set done to false, DUUUHH
             drillingDone = false;
             //move drills to start after init
-            toStart = true;
+            movingToPosition = true;
 
             //ground level flattening
             found = initArgs.TryGetValue("initflattening", out outval);
@@ -548,7 +522,7 @@ namespace SpaceEngineersScripts
             }
             else
             {
-                initflattening = END_FLATTENING;
+                endflattening = END_FLATTENING;
             }
 
             //reset the current circle index to init state
@@ -591,19 +565,12 @@ namespace SpaceEngineersScripts
             var pistonTempList = new List<IMyTerminalBlock>();
             GridTerminalSystem.GetBlocksOfType<IMyPistonBase>(pistonTempList);
 
-            foreach (var vPiston in pistonTempList)
-            {
-                if (vPiston.CustomName.Contains(V_PISTON_NAME))
-                    VerticalPistons.Add(vPiston as IMyPistonBase);
-            }
+            pistonTempList.ForEach(vPiston => { if (vPiston.CustomName.Contains(V_PISTON_NAME)) { VerticalPistons.Add(vPiston as IMyPistonBase); } });
 
             var drillTempList = new List<IMyTerminalBlock>();
             GridTerminalSystem.GetBlocksOfType<IMyShipDrill>(drillTempList);
 
-            foreach (var drill in drillTempList)
-            {
-                Drills.Add(drill as IMyShipDrill);
-            }
+            drillTempList.ForEach(drill => Drills.Add(drill as IMyShipDrill));
 
             if (DEBUG)
                 OutputToDebug(string.Format("#vertical pistons: {0}\n#drils: {1}", VerticalPistons.Count, Drills.Count));
@@ -611,20 +578,15 @@ namespace SpaceEngineersScripts
             SetStatusToAntenna("INIT-Done", false, false);
         }
 
-        private void OutputToDebug(string text)
+        void OutputToDebug(string text)
         {
             if (OutputPanels == null || OutputPanels.Count == 0)
             {
                 OutputPanels = new List<IMyTextPanel>();
-                var pannelTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(pannelTempList);
+                var panelTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(panelTempList);
 
-                foreach (var panel in pannelTempList)
-                {
-                    if (panel.CustomName.Contains(DEBUG_PANEL_NAME))
-                        OutputPanels.Add(panel as IMyTextPanel);
-                }
-
+                panelTempList.ForEach(panel => { if (panel.CustomName.Contains(DEBUG_PANEL_NAME)) { (panel as IMyTextPanel).WritePublicTitle("DEBUG"); OutputPanels.Add(panel as IMyTextPanel); } });
             }
 
             if (OutputPanels != null)
@@ -632,38 +594,25 @@ namespace SpaceEngineersScripts
                 if (!text.EndsWith("\n"))
                     text += "\n";
 
-                foreach (var panel in OutputPanels)
-                {
-                    panel.WritePublicText(panel.GetPublicText() + text);
-                    panel.WritePublicTitle("DEBUG");
-                }
+                OutputPanels.ForEach(panel => panel.WritePublicText(panel.GetPublicText() + text));
             }
         }
 
-        private void ClearDebug()
+        void ClearDebug()
         {
             if (OutputPanels == null || OutputPanels.Count == 0)
             {
                 OutputPanels = new List<IMyTextPanel>();
-                var pannelTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(pannelTempList);
+                var panelTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(panelTempList);
 
-                foreach (var panel in pannelTempList)
-                {
-                    if (panel.CustomName.Contains(DEBUG_PANEL_NAME))
-                        OutputPanels.Add(panel as IMyTextPanel);
-                }
-
+                panelTempList.ForEach(panel => { if (panel.CustomName.Contains(DEBUG_PANEL_NAME)) { OutputPanels.Add(panel as IMyTextPanel); } });
             }
 
-            foreach (var panel in OutputPanels)
-            {
-                panel.WritePublicText("");
-                panel.WritePublicTitle("DEBUG");
-            }
+            OutputPanels.ForEach(panel => { panel.WritePublicText(""); panel.WritePublicTitle("DEBUG"); });
         }
 
-        public void SetStatusToAntenna(string status, bool showPercentage = true, bool showEta = true)
+        void SetStatusToAntenna(string status, bool showPercentage = true, bool showEta = true)
         {
             if (DEBUG)
                 OutputToDebug(string.Format("Setting {0} status to the antennas", status));
@@ -674,10 +623,7 @@ namespace SpaceEngineersScripts
                 var antennaTempList = new List<IMyTerminalBlock>();
                 GridTerminalSystem.GetBlocksOfType<IMyRadioAntenna>(antennaTempList);
 
-                foreach (var antenna in antennaTempList)
-                {
-                    Antennas.Add(antenna as IMyRadioAntenna);
-                }
+                antennaTempList.ForEach(antenna => Antennas.Add(antenna as IMyRadioAntenna));
             }
 
             string antennaName = "{0} - {1}";
@@ -688,17 +634,14 @@ namespace SpaceEngineersScripts
 
             if (Antennas != null)
             {
-                foreach (var antenna in Antennas)
-                {
-                    antenna.SetCustomName(string.Format(antennaName, DRILL_STATION_NAME, status, getPercentageDone(), GetETA()));
-                }
+                Antennas.ForEach(antenna => antenna.SetCustomName(string.Format(antennaName, DRILL_STATION_NAME, status, getPercentageDone(), GetETA())));
             }
 
             if (DEBUG)
                 OutputToDebug("Done setting status to the antennas");
         }
 
-        private float GetPistonsTotalPosition(List<IMyPistonBase> pistons)
+        float GetPistonsTotalPosition(List<IMyPistonBase> pistons)
         {
 
             if (DEBUG)
@@ -706,10 +649,7 @@ namespace SpaceEngineersScripts
 
             var total = 0f;
 
-            foreach (var piston in pistons)
-            {
-                total += piston.CurrentPosition;
-            }
+            pistons.ForEach(piston => total += piston.CurrentPosition);
 
             if (DEBUG)
                 OutputToDebug("Done Calculating total position of pistons");
@@ -717,7 +657,7 @@ namespace SpaceEngineersScripts
             return total;
         }
 
-        private float GetRotorPosition()
+        float GetRotorPosition()
         {
             var currentposition = "";
 
@@ -736,7 +676,7 @@ namespace SpaceEngineersScripts
             return float.Parse(currentposition);
         }
 
-        private void ForceRotorsTorque()
+        void ForceRotorsTorque()
         {
             if (DEBUG)
                 OutputToDebug("Forcing rotor torque");
@@ -745,7 +685,7 @@ namespace SpaceEngineersScripts
             Rotor.SetValueFloat("Torque", 10000000);
         }
 
-        private void MoveRotorToPosition(float destinationPosition, float rpm = ROTOR_RPM)
+        void MoveRotorToPosition(float destinationPosition, float rpm = ROTOR_RPM)
         {
 
             var currentPosition = GetRotorPosition();
@@ -784,7 +724,7 @@ namespace SpaceEngineersScripts
             }
         }
 
-        private void SetRotorLimits(float lower, float upper)
+        void SetRotorLimits(float lower, float upper)
         {
             if (DEBUG)
             {
@@ -804,7 +744,7 @@ namespace SpaceEngineersScripts
             Rotor.SetValueFloat("UpperLimit", upper);
         }
 
-        private void setRotorSpeed(float rpm)
+        void setRotorSpeed(float rpm)
         {
             if (DEBUG)
                 OutputToDebug(string.Format("Setting Rotor speed to: {0}", rpm));
@@ -813,7 +753,7 @@ namespace SpaceEngineersScripts
             Rotor.GetActionWithName("OnOff_On").Apply(Rotor); // Start rotor
         }
 
-        private void RemoveRotorLimits()
+        void RemoveRotorLimits()
         {
             if (DEBUG)
                 OutputToDebug("Resetting Rotor limits");
@@ -821,26 +761,21 @@ namespace SpaceEngineersScripts
             SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
         }
 
-        private void MovePistonToPosition(List<IMyPistonBase> pistons, float destPosition, float speed = 0.5f)
+        void MovePistonToPosition(List<IMyPistonBase> pistons, float destPosition, float speed = 0.5f)
         {
             if (DEBUG)
             {
                 OutputToDebug(string.Format("Moving #{0} pistons to combined position: {1}", pistons.Count, destPosition));
                 var combinedPosition = 0f;
-                foreach (var piston in pistons)
-                {
-                    combinedPosition += piston.CurrentPosition;
-                }
+                pistons.ForEach(piston => combinedPosition += piston.CurrentPosition);
+
                 OutputToDebug(string.Format("Current combined position: {0}", combinedPosition));
             }
 
-            foreach (var piston in pistons)
-            {
-                MovePistonToPosition(piston, destPosition / (float)pistons.Count, speed / (float)pistons.Count);
-            }
+            pistons.ForEach(piston => MovePistonToPosition(piston, destPosition / (float)pistons.Count, speed / (float)pistons.Count));
         }
 
-        private void MovePistonToPosition(IMyPistonBase piston, float destPosition, float speed = 0.5f)
+        void MovePistonToPosition(IMyPistonBase piston, float destPosition, float speed = 0.5f)
         {
             if (DEBUG)
             {
@@ -861,7 +796,7 @@ namespace SpaceEngineersScripts
             }
         }
 
-        private string GetETA()
+        string GetETA()
         {
             if (DEBUG)
                 OutputToDebug("Calculating ETA");
@@ -884,7 +819,7 @@ namespace SpaceEngineersScripts
 
                 return string.Format("~ {0}m", Math.Round(seconds / 60, MidpointRounding.AwayFromZero));
             }
-            catch (Exception e)
+            catch (Exception)
             {
                 if (DEBUG)
                     OutputToDebug("Calculating ETA ended with error, returning 'UNKNOWN'");
@@ -892,8 +827,7 @@ namespace SpaceEngineersScripts
                 return "UNKNOWN";
             }
         }
-
-        private float getPercentageDone()
+        float getPercentageDone()
         {
             if (DEBUG)
                 OutputToDebug("Calculating Percentage Done");
@@ -908,7 +842,7 @@ namespace SpaceEngineersScripts
                 }
                 else
                 {
-                    percentageDone = (currentCircle * GetPistonsTotalPosition(VerticalPistons)) / (DRILL_RADII.Count * TARGET_DEPTH);
+                    percentageDone = 100 * ((currentCircle + 1) * GetPistonsTotalPosition(VerticalPistons)) / (DRILL_RADII.Count * TARGET_DEPTH);
                 }
 
                 if (DEBUG)
