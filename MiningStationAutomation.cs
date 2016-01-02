@@ -219,6 +219,9 @@ namespace SpaceEngineersScripts
                 //if to start is false, the we are at the starting position, set the current index to 0
                 if (!toStart)
                 {
+
+                    SetStatusToAntenna("DRILL-INIT tostart = " + toStart);
+
                     //ínit is done
                     currentCircle = 0;
 
@@ -270,7 +273,16 @@ namespace SpaceEngineersScripts
                         if (DEBUG)
                             OutputToDebug("All pistons reached max depth, returning to start position");
 
-                        ToStart(++currentCircle);
+                        SetStatusToAntenna(string.Format("DRILL-[{0}/{1}]-DONE doing ToPosition", currentCircle, DRILL_RADII.Count, currentCircle));
+
+                        ToPosition(DRILL_RADII[currentCircle], 0, GetRotorPosition());
+
+                        currentCircle++;
+
+                        SetStatusToAntenna(string.Format("DRILL-[{0}/{1}] incremented current circle", currentCircle, DRILL_RADII.Count, currentCircle));
+
+                        SetStatusToAntenna(string.Format("DRILL-[{0}/{1}] setting up", currentCircle, DRILL_RADII.Count, currentCircle));
+
                     }
                 }
                 else {
@@ -465,6 +477,8 @@ namespace SpaceEngineersScripts
             {
                 working = ToPosition(0, 0, 0);
             }
+
+            SetStatusToAntenna("DEBUG TO_START, working: " + working);
 
             if (!working)
             {
