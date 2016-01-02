@@ -30,13 +30,15 @@ namespace SpaceEngineersScripts
         readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
+        const bool INIT_FLATTENING = true; // safety precaoution
+        const bool END_FLATTENING = true; //flatten pit bottom to allow cars to drive more easily;
         //BLOCK SETUP
         const string ROTOR_NAME = "Drill Rotor";
         const string H_PISTON_NAME = "Horizontal Piston";
         const string V_PISTON_NAME = "Vertical Piston";
         const string DRILL_STATION_NAME = "Drill Station";
         const string DEBUG_PANEL_NAME = "Debug Panel";
-        const float TARGET_DEPTH = 0.1f;
+        const float TARGET_DEPTH = 0.075f;
         #endregion
 
         private IMyPistonBase HorizontalPiston { get; set; }
@@ -51,7 +53,8 @@ namespace SpaceEngineersScripts
 
         private bool toStart = false;
         private int currentCircle = -1;
-        private bool safetyCircles = false;
+        private bool initflattening = false;
+        private bool endflattening = false;
         private bool drillingDone = false;
         private Dictionary<string, string> initArgs;
 
@@ -72,9 +75,9 @@ namespace SpaceEngineersScripts
                     return;
                 }
 
-                if (safetyCircles)
+                if (initflattening)
                 {
-                    SafetyCircles();
+                    FlatteninCircles();
                     return;
                 }
 
@@ -87,9 +90,16 @@ namespace SpaceEngineersScripts
                 }
                 else
                 {
-                    ToStart();
-                    if (toStart)
-                        Shutdown();
+                    if (endflattening)
+                    {
+                        FlatteninCircles(TARGET_DEPTH);
+                        return;
+                    }
+                    else {
+                        ToStart();
+                        if (!toStart)
+                            Shutdown();
+                    }
                 }
             }
             catch (Exception e)
@@ -195,12 +205,10 @@ namespace SpaceEngineersScripts
         {
             ClearDebug();
 
-            SetStatusToAntenna("DRILL");
-
             //check for init  conditions
             if (currentCircle < 0)
             {
-                currentCircle = 0;
+                SetStatusToAntenna("DRILL-INIT");
 
                 if (DEBUG)
                     OutputToDebug("Drill sequece, init");
@@ -211,10 +219,16 @@ namespace SpaceEngineersScripts
                 //if to start is false, the we are at the starting position, set the current index to 0
                 if (!toStart)
                 {
+                    //ínit is done
+                    currentCircle = 0;
+
                     //remove rotor limits
                     SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
 
                     //Move the horizontal piston to the circle defined
+                    if (DEBUG)
+                        OutputToDebug(string.Format("trying to access DRILL_RADII witj index {0} [1]", currentCircle));
+
                     MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
 
                     //start the rotor
@@ -226,6 +240,8 @@ namespace SpaceEngineersScripts
             }
             else
             {
+                SetStatusToAntenna("DRILL");
+
                 if (!(currentCircle >= DRILL_RADII.Count))
                 {
                     //start the rotor
@@ -234,7 +250,12 @@ namespace SpaceEngineersScripts
                     if (DEBUG)
                         OutputToDebug(string.Format("Drilling circle {0}", currentCircle));
 
+                    SetStatusToAntenna(string.Format("DRILL[{0}/{1}]", currentCircle, DRILL_RADII.Count));
+
                     //Move the horizontal piston to the circle defined
+                    if (DEBUG)
+                        OutputToDebug(string.Format("trying to access DRILL_RADII witj index {0} [2]", currentCircle));
+
                     MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
 
                     //move the vertical positions
@@ -245,6 +266,7 @@ namespace SpaceEngineersScripts
 
                     if (TARGET_DEPTH <= GetPistonsTotalPosition(VerticalPistons))
                     {
+                        SetStatusToAntenna(string.Format("DRILL-[{0}/{1}]-DONE", currentCircle, DRILL_RADII.Count));
                         if (DEBUG)
                             OutputToDebug("All pistons reached max depth, returning to start position");
 
@@ -252,6 +274,8 @@ namespace SpaceEngineersScripts
                     }
                 }
                 else {
+                    SetStatusToAntenna("DRILL-DONE");
+
                     OutputToDebug("Drill sequece, closure");
                     //move to the start position
                     ToStart();
@@ -269,29 +293,31 @@ namespace SpaceEngineersScripts
             }
         }
 
-        private void SafetyCircles()
+        private void FlatteninCircles(float depth = 0f)
         {
             //clear the output screen
             ClearDebug();
 
             if (DEBUG)
             {
-                OutputToDebug("Drilling the Safety rounds");
+                OutputToDebug("Drilling the flattening rounds");
                 OutputToDebug(string.Format("Current circle: {0}", currentCircle));
             }
 
-            SetStatusToAntenna("SAFETY-CIRCLES");
+            SetStatusToAntenna("FLATTENING", false);
 
             var currentRotorposition = GetRotorPosition();
 
             //turn the rotor to zero to if the current circle is -1
-            if (currentCircle < 0)
+            if (currentCircle < 0 || depth != GetPistonsTotalPosition(VerticalPistons))
             {
                 if (DEBUG)
-                    OutputToDebug("init safety rounds, moving rotor to start");
+                    OutputToDebug("init flattening rounds, moving rotor to start");
 
                 //debug outs happen in the method
                 MoveRotorToPosition(-180f, 15f);
+
+                MovePistonToPosition(VerticalPistons, depth);
             }
 
             currentRotorposition = GetRotorPosition();
@@ -308,7 +334,7 @@ namespace SpaceEngineersScripts
             *
             * We need to check to prevent en index out of bounds. if that woudl happen, then we end the safety rounds.
             */
-            if (currentRotorposition <= -180)
+            if (currentRotorposition <= -180 && depth == GetPistonsTotalPosition(VerticalPistons))
             {
                 currentCircle++;
 
@@ -323,7 +349,7 @@ namespace SpaceEngineersScripts
                 if (currentCircle >= DRILL_RADII.Count)
                 {
                     //set the safety rounds to false as we are done
-                    safetyCircles = false;
+                    initflattening = false;
 
                     //set the current position back to -1 (init state of each step)
                     currentCircle = -1;
@@ -335,67 +361,60 @@ namespace SpaceEngineersScripts
                     MovePistonToPosition(HorizontalPiston, DRILL_RADII[0]);
 
                     if (DEBUG)
-                        OutputToDebug("Ended Safety Circles");
+                        OutputToDebug("Ended flattening Circles");
 
                     return;
                 }
 
                 //Move the horizontal piston to the circle defined
+                if (DEBUG)
+                    OutputToDebug(string.Format("trying to access DRILL_RADII witj index {0} [3]", currentCircle));
+
                 MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
 
-                setRotorSpeed(ROTOR_RPM * 30);
+                setRotorSpeed(ROTOR_RPM * 30f);
             }
 
             //reverse the drills so the radius gets drilled the second time
-            if (currentRotorposition >= 180)
+            if (currentRotorposition >= 180 && depth == GetPistonsTotalPosition(VerticalPistons))
             {
-                setRotorSpeed(-ROTOR_RPM - 30);
+                setRotorSpeed(-ROTOR_RPM * 30f);
             }
 
             if (DEBUG)
                 OutputToDebug(string.Format("currentCircle: {0}", currentCircle));
         }
 
-        private void ToStart(int targetCurrentCircle = -1)
+        private bool ToPosition(float width, float depth, float rotattion)
         {
+            bool working = false;
+
             ClearDebug();
 
             if (DEBUG)
-                OutputToDebug("setting up starting conditions");
-
-            bool working = false;
-            //When the rotor is turning, stop it
-            if (DEBUG)
-                OutputToDebug("Setting  Rotor speed to 0RPM");
+            {
+                OutputToDebug(string.Format("moving to position width: {0}, depth: {1}, rotation: {2}", width, depth, rotattion));
+                OutputToDebug(string.Format("Action in progress: {0}", working));
+                OutputToDebug("stopping rotor and turning on drills");
+            }
 
             setRotorSpeed(0f);
 
             //If the drills ar not on, turn on
             foreach (var drill in Drills)
             {
-                if (DEBUG)
-                    OutputToDebug(string.Format("turning on drill {0}", drill.CustomName));
-
                 drill.GetActionWithName("OnOff_On").Apply(drill);
             }
 
             if (DEBUG)
                 OutputToDebug(string.Format("Action in progress: {0}", working));
 
-            //While the vPistons are not retracted, retract
-            if (!working)
+            //While the vPistons are not in position, move
             {
-                foreach (var piston in VerticalPistons)
+                if (GetPistonsTotalPosition(VerticalPistons) != depth)
                 {
-
-                    if (piston.CurrentPosition > 0)
-                    {
-                        if (DEBUG)
-                            OutputToDebug(string.Format("moving Vertical Piston '{0}' to start position", piston.CustomName));
-
-                        working = true;
-                        MovePistonToPosition(piston, 0);
-                    }
+                    MovePistonToPosition(VerticalPistons, depth);
+                    working = true;
                 }
             }
             if (DEBUG)
@@ -403,18 +422,13 @@ namespace SpaceEngineersScripts
 
             //if working, stop method
             if (working)
-            {
-                return;
-            }
+                return working;
 
-            //When the vPistons are retracted, retract the hPiston
-            if (HorizontalPiston.CurrentPosition > 0)
+            //When the hPistons are retracted, retract the hPiston
+            if (HorizontalPiston.CurrentPosition != 0)
             {
-                if (DEBUG)
-                    OutputToDebug(string.Format("moving Horizontal Piston to start position"));
-
+                MovePistonToPosition(HorizontalPiston, width);
                 working = true;
-                MovePistonToPosition(HorizontalPiston, 0);
             }
 
             if (DEBUG)
@@ -422,30 +436,43 @@ namespace SpaceEngineersScripts
 
             //if working, stop method
             if (working)
+                return working;
+
+            //move rotor to position
+            if (GetRotorPosition() != rotattion)
             {
-                return;
+                MoveRotorToPosition(rotattion);
+                working = true;
             }
 
-            //TODO: move rotor to 0 degree
-            if (GetRotorPosition() != 0)
+            if (DEBUG)
+                OutputToDebug(string.Format("reached end of ToPosition, work in progress: {0}", working));
+
+            return working;
+        }
+
+        private void ToStart(int targetCurrentCircle = -1)
+        {
+            var working = false;
+
+            SetStatusToAntenna("DEBUG TO_START, init targetCircle" + targetCurrentCircle);
+
+            if (targetCurrentCircle > -1)
             {
-                working = true;
-                MoveRotorToPosition(0);
+                working = ToPosition(DRILL_RADII[targetCurrentCircle], 0, 0);
             }
             else
             {
-                RemoveRotorLimits();
+                working = ToPosition(0, 0, 0);
             }
-
-
-            if (DEBUG)
-                OutputToDebug(string.Format("reached end of ToStart() work in progress: {0}", working));
 
             if (!working)
             {
                 if (DEBUG)
                     OutputToDebug(string.Format("setting current step to: {0}", targetCurrentCircle));
                 //set the current circle, defaul -1 (init state of each step)
+
+                SetStatusToAntenna("DEBUG TO_START NOT WORKING, SETTING currentCircle " + currentCircle);
                 currentCircle = targetCurrentCircle;
             }
 
@@ -481,18 +508,33 @@ namespace SpaceEngineersScripts
             drillingDone = false;
             //move drills to start after init
             toStart = true;
-            //initiate the safety circles after init
-            found = initArgs.TryGetValue("skipsafetycircles", out outval);
+
+            //ground level flattening
+            found = initArgs.TryGetValue("initflattening", out outval);
 
             if (found)
             {
-                safetyCircles = bool.Parse(outval);
+                initflattening = bool.Parse(outval);
                 if (DEBUG)
-                    OutputToDebug(string.Format("input arg skipsafetycircles found: {0}", safetyCircles));
+                    OutputToDebug(string.Format("input arg groundlevelflattening found: {0}", initflattening));
             }
             else
             {
-                safetyCircles = true;
+                initflattening = INIT_FLATTENING;
+            }
+
+            //bottom flattening
+            found = initArgs.TryGetValue("endflattening", out outval);
+
+            if (found)
+            {
+                endflattening = bool.Parse(outval);
+                if (DEBUG)
+                    OutputToDebug(string.Format("input arg skipsafetycircles found: {0}", endflattening));
+            }
+            else
+            {
+                initflattening = END_FLATTENING;
             }
 
             //reset the current circle index to init state
@@ -814,7 +856,7 @@ namespace SpaceEngineersScripts
             {
                 var seconds = 0f;
 
-                if (safetyCircles)
+                if (initflattening)
                 {
                     seconds = ((DRILL_RADII.Count - currentCircle) * 2) / (ROTOR_RPM / 60) + (TARGET_DEPTH / DRILL_DOWN_SPEED) * DRILL_RADII.Count;
                 }
@@ -846,7 +888,7 @@ namespace SpaceEngineersScripts
             {
                 var percentageDone = 0f;
 
-                if (safetyCircles)
+                if (initflattening)
                 {
                     percentageDone = 0;
                 }
