@@ -58,8 +58,6 @@ namespace SpaceEngineersScripts
         private bool drillingDone = false;
         private Dictionary<string, string> initArgs;
 
-        //TODO: fix drill index issue;
-        //TODO do end flattening
         void Main(string argument)
         {
             //check if all blocks are initialized
@@ -76,7 +74,7 @@ namespace SpaceEngineersScripts
 
             if (initflattening)
             {
-                FlatteninCircles();
+                FlattenignCircles();
                 return;
             }
 
@@ -91,7 +89,7 @@ namespace SpaceEngineersScripts
             {
                 if (endflattening)
                 {
-                    FlatteninCircles(TARGET_DEPTH);
+                    FlattenignCircles(TARGET_DEPTH);
                     //the we are doen with the endflattening
                     if (currentCircle < 0)
                     {
@@ -145,10 +143,6 @@ namespace SpaceEngineersScripts
 
         void CLeanRefineries(int refineryTargetInventoryIndex = 1)
         {
-            ClearDebug();
-
-            OutputToDebug("cleaning refineries started");
-
             //get Refineries
             if (Refineries == null)
                 Refineries = new List<IMyTerminalBlock>();
@@ -189,8 +183,6 @@ namespace SpaceEngineersScripts
                     }
                 }
             }
-
-            OutputToDebug("cleaning refineries ended");
         }
 
         void Drill()
@@ -239,6 +231,7 @@ namespace SpaceEngineersScripts
                     SetStatusToAntenna(string.Format("DRILLING {0}/{1}", currentCircle + 1, DRILL_RADII.Count));
 
                     //start the rotor
+                    RemoveRotorLimits();
                     setRotorSpeed(ROTOR_RPM);
 
                     if (DEBUG)
@@ -296,14 +289,14 @@ namespace SpaceEngineersScripts
             }
         }
 
-        void FlatteninCircles(float depth = 0f)
+        void FlattenignCircles(float depth = 0f)
         {
             //clear the output screen
             ClearDebug();
 
             if (DEBUG)
             {
-                OutputToDebug("Drilling the flattening rounds");
+                OutputToDebug(string.Format("Drilling the flattening rounds on depth {0}", depth));
                 OutputToDebug(string.Format("Current circle: {0}", currentCircle));
             }
 
@@ -614,9 +607,6 @@ namespace SpaceEngineersScripts
 
         void SetStatusToAntenna(string status, bool showPercentage = true, bool showEta = true)
         {
-            if (DEBUG)
-                OutputToDebug(string.Format("Setting {0} status to the antennas", status));
-
             if (Antennas == null || Antennas.Count == 0)
             {
                 Antennas = new List<IMyRadioAntenna>();
@@ -628,7 +618,7 @@ namespace SpaceEngineersScripts
 
             string antennaName = "{0} - {1}";
             if (showPercentage)
-                antennaName += " ({2}%)";
+                antennaName += " ({2:0.##}%)";
             if (showEta)
                 antennaName += " [{3}]";
 
@@ -636,9 +626,6 @@ namespace SpaceEngineersScripts
             {
                 Antennas.ForEach(antenna => antenna.SetCustomName(string.Format(antennaName, DRILL_STATION_NAME, status, getPercentageDone(), GetETA())));
             }
-
-            if (DEBUG)
-                OutputToDebug("Done setting status to the antennas");
         }
 
         float GetPistonsTotalPosition(List<IMyPistonBase> pistons)
@@ -652,7 +639,7 @@ namespace SpaceEngineersScripts
             pistons.ForEach(piston => total += piston.CurrentPosition);
 
             if (DEBUG)
-                OutputToDebug("Done Calculating total position of pistons");
+                OutputToDebug(string.Format("Done Calculating total position of pistons: {0}", total));
 
             return total;
         }
@@ -687,7 +674,6 @@ namespace SpaceEngineersScripts
 
         void MoveRotorToPosition(float destinationPosition, float rpm = ROTOR_RPM)
         {
-
             var currentPosition = GetRotorPosition();
 
             if (DEBUG)
@@ -798,9 +784,6 @@ namespace SpaceEngineersScripts
 
         string GetETA()
         {
-            if (DEBUG)
-                OutputToDebug("Calculating ETA");
-
             try
             {
                 var seconds = 0f;
@@ -814,10 +797,7 @@ namespace SpaceEngineersScripts
                     seconds = (TARGET_DEPTH / DRILL_DOWN_SPEED) * (DRILL_RADII.Count - currentCircle);
                 }
 
-                if (DEBUG)
-                    OutputToDebug("Done Calculating ETA");
-
-                return string.Format("~ {0}m", Math.Round(seconds / 60, MidpointRounding.AwayFromZero));
+                return string.Format("~ {0}m", Math.Round(seconds / 60, 2, MidpointRounding.AwayFromZero));
             }
             catch (Exception)
             {
@@ -829,9 +809,6 @@ namespace SpaceEngineersScripts
         }
         float getPercentageDone()
         {
-            if (DEBUG)
-                OutputToDebug("Calculating Percentage Done");
-
             if (VerticalPistons != null)
             {
                 var percentageDone = 0f;
@@ -842,11 +819,10 @@ namespace SpaceEngineersScripts
                 }
                 else
                 {
-                    percentageDone = 100 * ((currentCircle + 1) * GetPistonsTotalPosition(VerticalPistons)) / (DRILL_RADII.Count * TARGET_DEPTH);
+                    percentageDone = (float)currentCircle / DRILL_RADII.Count;
+                    percentageDone += GetPistonsTotalPosition(VerticalPistons) / (TARGET_DEPTH * DRILL_RADII.Count);
+                    percentageDone *= 100;
                 }
-
-                if (DEBUG)
-                    OutputToDebug("finished Calculating Percentage Done");
 
                 return percentageDone;
             }
