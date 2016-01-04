@@ -33,7 +33,7 @@ namespace SpaceEngineersScripts
         readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
-        const bool INIT_FLATTENING = true; // safety precaoution
+        const bool INIT_FLATTENING = true; // safety precaution
         const bool END_FLATTENING = true; //flatten pit bottom to allow cars to drive more easily;
 
         //BLOCK SETUP
@@ -94,7 +94,7 @@ namespace SpaceEngineersScripts
                 if (endflattening)
                 {
                     FlatteningCircles(TARGET_DEPTH);
-                    //the we are doen with the endflattening
+                    //then we are done with the endflattening
                     if (currentCircle < 0)
                     {
                         endflattening = false;
@@ -193,7 +193,7 @@ namespace SpaceEngineersScripts
         {
             ClearDebug();
 
-            //check for init  conditions
+            //check for init conditions
             if (currentCircle < 0)
             {
                 SetStatusToAntenna("DRILLING-INIT");
@@ -291,7 +291,7 @@ namespace SpaceEngineersScripts
 
                         currentCircle = -1;
 
-                        //TODO: turn off everything nonvital
+                        //TODO: turn off everything non-vital
                         drillingDone = true;
                     }
                 }
@@ -337,7 +337,7 @@ namespace SpaceEngineersScripts
             * 2) moving the hPiston to the respective position
             * 3) reversing the rotor so the the radius gets drilled the first time
             *
-            * We need to check to prevent en index out of bounds. if that woudl happen, then we end the safety rounds.
+            * We need to check to prevent en index out of bounds. if that would happen, then we end the safety rounds.
             */
             if (currentRotorposition <= -180 && depth == GetPistonsTotalPosition(VerticalPistons))
             {
@@ -346,7 +346,7 @@ namespace SpaceEngineersScripts
                 if (DEBUG)
                     OutputToDebug(string.Format("Current circle: {0}", currentCircle));
 
-                //full cricle, cannot use 360 or as SE will interpret it as +infinity
+                //full circle, cannot use 360 or as SE will interpret it as +infinity
                 // idem for negativ values
                 SetRotorLimits(-180, 180);
 
@@ -419,7 +419,7 @@ namespace SpaceEngineersScripts
 
             working = moveVertical || moveHorizontal || moveCircle;
 
-            //If the drills ar not on, turn on
+            //If the drills are not on, turn on
             Drills.ForEach(drill => drill.GetActionWithName("OnOff_On").Apply(drill));
 
             //While the vPistons are not in position, move
