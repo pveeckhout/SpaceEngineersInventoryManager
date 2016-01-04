@@ -25,7 +25,7 @@ namespace SpaceEngineersScripts
         //TODO: fix shutdown trigger
         //TODO: fix percentage done
         //TODO: fix ETA
-        #region Proggrammable block script
+        #region Programmable block script
         #region Config
         //OPERATIONAL
         const float ROTOR_RPM = 0.5f;
