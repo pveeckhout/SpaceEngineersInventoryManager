@@ -1,4 +1,5 @@
 ﻿using Sandbox.ModAPI.Ingame;
+using Sandbox.ModAPI.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -109,75 +110,17 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         abstract class State
         {
-            /*protected IMyMotorAdvancedStator Rotor { get; set; }
-            protected List<IMyPistonBase> HorizontalPiston { get; set; }
-            protected List<IMyPistonBase> VerticalPistons { get; set; }
-            protected List<IMyShipDrill> Drills { get; set; }
-            protected List<IMyRadioAntenna> Antennas { get; set; }
-            protected List<IMyTextPanel> DebugPanels { get; set; }
-            protected List<IMyRefinery> Refineries { get; set; }*/
-            protected List<IMyCargoContainer> CargoContainers { get; set; }
-
-            private void Initialize(DrillStation context)
-            {
-                IMyGridTerminalSystem GridTerminalSystem = context.GridTerminalSystem;
-
-                //VerticalPistons 
-                /*VerticalPistons = new List<IMyPistonBase>();
-                var hPistonTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyPistonBase>(hPistonTempList);
-                hPistonTempList.ForEach(vPiston => { if (vPiston.CustomName.Contains(H_PISTON_NAME)) { VerticalPistons.Add(vPiston as IMyPistonBase); } });*/
-
-                //VerticalPistons 
-                /*VerticalPistons = new List<IMyPistonBase>();
-                var vPistonTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyPistonBase>(vPistonTempList);
-                vPistonTempList.ForEach(vPiston => { if (vPiston.CustomName.Contains(V_PISTON_NAME)) { VerticalPistons.Add(vPiston as IMyPistonBase); } });*/
-
-                //Drills
-                /*Drills = new List<IMyShipDrill>();
-                var drillTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyShipDrill>(drillTempList);
-                drillTempList.ForEach(drill => Drills.Add(drill as IMyShipDrill));*/
-
-                //Antennas
-                /*Antennas = new List<IMyRadioAntenna>();
-                var antennaTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyRadioAntenna>(antennaTempList);
-                antennaTempList.ForEach(antenna => Antennas.Add(antenna as IMyRadioAntenna));*/
-
-                //DebugPanels
-                /*DebugPanels = new List<IMyTextPanel>();
-                var debugPanelTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(debugPanelTempList);
-                debugPanelTempList.ForEach(debugPanel => DebugPanels.Add(debugPanel as IMyTextPanel));*/
-
-                //Refineries
-                /*Refineries = new List<IMyRefinery>();
-                var refineryTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyRefinery>(refineryTempList);
-                refineryTempList.ForEach(refinery => Refineries.Add(refinery as IMyRefinery));*/
-
-                //CargoContainers
-                CargoContainers = new List<IMyCargoContainer>();
-                var containerTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(containerTempList);
-                containerTempList.ForEach(antenna => CargoContainers.Add(antenna as IMyCargoContainer));
-            }
-
-            public virtual void Handle(DrillStation context) {
-                Initialize(context);
-            }
+            public abstract void Handle(DrillStation context);
         }
 
         /// <summary>
         /// The 'Context' class
         /// </summary>
-        [Serializable]
-        class DrillStation : ISerializable
+        class DrillStation
         {
             private State _state;
             private IMyGridTerminalSystem _gridTerminalSystem;
+            private DrillStationBlocks _drillStationBlocks;
 
             // Constructor
             public DrillStation(IMyGridTerminalSystem GridTerminalSystem)
@@ -228,6 +171,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     //init is the default state
                     this.State = new InitState();
                 }
+
+                this._drillStationBlocks = new DrillStationBlocks(GridTerminalSystem);
             }
 
             // Gets or sets the state
@@ -240,20 +185,287 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             // Gets the GridTerminalSystem
             public IMyGridTerminalSystem GridTerminalSystem
             {
-                get { return _gridTerminalSystem;  }
-                set { _gridTerminalSystem = value; }
+                get { return _gridTerminalSystem; }
             }
 
+            // Gets the DrillStationBlocks
+            public DrillStationBlocks DrillStationBlocks
+            {
+                get { return _drillStationBlocks; }
+            }
+
+            /// <summary>
+            /// 
+            /// </summary>
             public void Request()
             {
                 _state.Handle(this);
             }
+        }
 
-            public void GetObjectData(SerializationInfo info, StreamingContext context)
+        public class DrillStationBlocks
+        {
+            public IMyMotorAdvancedStator Rotor { get; set; }
+            public List<IMyPistonBase> HorizontalPiston { get; set; }
+            public List<IMyPistonBase> VerticalPistons { get; set; }
+            public List<IMyShipDrill> Drills { get; set; }
+            public List<IMyRadioAntenna> Antennas { get; set; }
+            public List<IMyTextPanel> DebugPanels { get; set; }
+            public List<IMyRefinery> Refineries { get; set; }
+            public List<IMyCargoContainer> CargoContainers { get; set; }
+
+            public DrillStationBlocks(IMyGridTerminalSystem GridTerminalSystem)
             {
-                info.AddValue("StateType", State.GetType().Name);
+                Rotor = GridTerminalSystem.GetBlockWithName(ROTOR_NAME) as IMyMotorAdvancedStator;
+
+                //HorizontalPiston 
+                HorizontalPiston = new List<IMyPistonBase>();
+                var hPistonTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyPistonBase>(hPistonTempList);
+                hPistonTempList.ForEach(vPiston =>
+                {
+                    if (vPiston.CustomName.Contains(H_PISTON_NAME))
+                    {
+                        HorizontalPiston.Add(vPiston as IMyPistonBase);
+                    }
+                });
+
+                //VerticalPistons 
+                VerticalPistons = new List<IMyPistonBase>();
+                var vPistonTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyPistonBase>(vPistonTempList);
+                vPistonTempList.ForEach(vPiston =>
+                {
+                    if (vPiston.CustomName.Contains(V_PISTON_NAME))
+                    {
+                        VerticalPistons.Add(vPiston as IMyPistonBase);
+                    }
+                });
+
+                //Drills
+                Drills = new List<IMyShipDrill>();
+                var drillTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyShipDrill>(drillTempList);
+                drillTempList.ForEach(drill => Drills.Add(drill as IMyShipDrill));
+
+                //Antennas
+                Antennas = new List<IMyRadioAntenna>();
+                var antennaTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyRadioAntenna>(antennaTempList);
+                antennaTempList.ForEach(antenna => Antennas.Add(antenna as IMyRadioAntenna));
+
+                //DebugPanels
+                DebugPanels = new List<IMyTextPanel>();
+                var debugPanelTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(debugPanelTempList);
+                debugPanelTempList.ForEach(debugPanel => DebugPanels.Add(debugPanel as IMyTextPanel));
+
+                //Refineries
+                Refineries = new List<IMyRefinery>();
+                var refineryTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyRefinery>(refineryTempList);
+                refineryTempList.ForEach(refinery => Refineries.Add(refinery as IMyRefinery));
+
+                //CargoContainers
+                CargoContainers = new List<IMyCargoContainer>();
+                var containerTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(containerTempList);
+                containerTempList.ForEach(antenna => CargoContainers.Add(antenna as IMyCargoContainer));
             }
         }
-        #endregion
+
+        public static class BlockUtils
+        {
+            /// <summary>
+            /// Sets the state to all antena connected on the GridTerminalSystem
+            /// </summary>
+            /// <param name="antennaLists">List of IMyRadioAntenna</param>
+            /// <param name="status">Current status</param>
+            public static void SetStatusToAntennas(List<IMyRadioAntenna> antennaLists, string status)
+            {
+                if (antennaLists == null)
+                    return;
+
+                string antennaName = "{0} - {1}";
+                antennaLists.ForEach(antenna => antenna.SetCustomName(string.Format(antennaName, DRILL_STATION_NAME, status)));
+            }
+
+            /// <summary>
+            /// gets the total amount of psiton extention
+            /// </summary>
+            /// <param name="pistons">List of IMyPistonBase</param>
+            /// <returns>the total extention in meter</returns>
+            public static float GetPistonsTotalPosition(List<IMyPistonBase> pistons)
+            {
+                var total = 0f;
+
+                pistons.ForEach(piston => total += piston.CurrentPosition);
+
+                return total;
+            }
+
+            /// <summary>
+            /// Evaluates the rotors currect position
+            /// </summary>
+            /// <param name="rotor">The rotor to get the position from.</param>
+            /// <returns>the rotor degree position</returns>
+            public static float GetRotorPosition(IMyMotorAdvancedStator rotor)
+            {
+                var currentposition = "";
+
+                System.Text.RegularExpressions.Regex matchthis = new System.Text.RegularExpressions.Regex(@"^.+\n.+\:\s?(-?[0-9]+).*[\s\S]*$");
+                System.Text.RegularExpressions.Match match = matchthis.Match(rotor.DetailedInfo);
+                if (match.Success)
+                {
+                    currentposition = match.Groups[1].Value;
+                }
+                else
+                {
+                    Echo("The rotor position could not parsed");
+                    throw new FormatException("The rotor position could not parsed");
+                }
+                return float.Parse(currentposition);
+            }
+
+            /// <summary>
+            /// forces the torque of the rotor to what i would call safe automatic operational levels
+            /// </summary>
+            public static void ForceRotorsTorque(IMyMotorAdvancedStator rotor)
+            {
+                rotor.SetValueFloat("BrakingTorque", 36000000);
+                rotor.SetValueFloat("Torque", 10000000);
+            }
+
+            /// <summary>
+            /// Moves the rotor to a certain position
+            /// </summary>
+            /// <param name="destinationPosition">the degree value of the postion</param>
+            /// <param name="rpm">the rotor speed to move with</param>
+            /// <returns>returns true wen the rotor is in postion, false if it needs to move.</returns>
+            public static bool MoveRotorToPosition(IMyMotorAdvancedStator rotor, float destinationPosition, float rpm)
+            {
+                var currentPosition = GetRotorPosition(rotor);
+
+                //set the limits
+                SetRotorLimits(rotor, destinationPosition, destinationPosition);
+
+                //move the rotor to within the limits
+                if (currentPosition == destinationPosition)
+                {
+                    setRotorSpeed(rotor, 0f);
+                    rotor.GetActionWithName("OnOff_Off").Apply(rotor); // Stop rotor
+                    return true;
+                }
+                else if (currentPosition < destinationPosition)
+                {
+                    rotor.GetActionWithName("OnOff_On").Apply(rotor); // Start rotor
+                    setRotorSpeed(rotor, rpm);
+                    return false;
+                }
+                else if (currentPosition > destinationPosition)
+                {
+                    rotor.GetActionWithName("OnOff_On").Apply(rotor); // Start rotor
+                    setRotorSpeed(rotor, -rpm);
+                    return false;
+                }
+
+                return false;
+            }
+
+            /// <summary>
+            /// Sets the rotor limits
+            /// </summary>
+            /// <param name="rotor">the rotor to set the limits on</param>
+            /// <param name="lower">the lower bound</param>
+            /// <param name="upper">the upper bound</param>
+            public static void SetRotorLimits(IMyMotorAdvancedStator rotor, float lower, float upper)
+            {
+                //warn for fuckery if settin values possible out of bounds when not obviously meant to be that way
+                if ((lower < -360 && lower != float.NegativeInfinity) || (upper > 360 && upper != float.PositiveInfinity))
+                {
+                    Echo("[WARN] Setting Rotor limits is doing wierd stuff around or beyond the 360 degree mark, often SE interprets this as infinity");
+                }
+
+                rotor.SetValueFloat("LowerLimit", lower);
+                rotor.SetValueFloat("UpperLimit", upper);
+            }
+
+            /// <summary>
+            /// Sets the rotor speeds
+            /// </summary>
+            /// <param name="rotor">the rotor to set the limits on</param>
+            /// <param name="rpm">the rotor speed in rpm</param>
+            public static void setRotorSpeed(IMyMotorAdvancedStator rotor, float rpm)
+            {
+                rotor.SetValueFloat("Velocity", rpm);
+                rotor.GetActionWithName("OnOff_On").Apply(rotor); // Start rotor
+            }
+
+            /// <summary>
+            /// sets the rotor limits to [-infity,infinity]
+            /// </summary>
+            /// <param name="rotor">The rotor to set the limits on.</param>
+            public static void RemoveRotorLimits(IMyMotorAdvancedStator rotor)
+            {
+                SetRotorLimits(rotor, float.NegativeInfinity, float.PositiveInfinity);
+            }
+
+            /// <summary>
+            /// moves the pistons to a certain extension postion, if there are multiple pistons, then the destPosition is split between all the psitons
+            /// </summary>
+            /// <param name="pistons"></param>
+            /// <param name="destPosition"></param>
+            /// <param name="speed"></param>
+            /// <returns>true if the psiton is in position</returns>
+            public static bool MovePistonsToPosition(List<IMyPistonBase> pistons, float destPosition, float speed)
+            {
+                var inPosition = true;
+
+                pistons.ForEach(piston =>
+                {
+                    inPosition &= MovePistonToPosition(piston, destPosition / (float)pistons.Count, speed / (float)pistons.Count);
+                });
+
+                return inPosition;
+            }
+
+            /// <summary>
+            /// moves the piston to a certain position
+            /// </summary>
+            /// <param name="piston"></param>
+            /// <param name="destinationPosition"></param>
+            /// <param name="speed"></param>
+            /// <returns>true if the psiton is in position</returns>
+            public static bool MovePistonToPosition(IMyPistonBase piston, float destinationPosition, float speed)
+            {
+                piston.SetValueFloat("LowerLimit", destinationPosition);
+                piston.SetValueFloat("UpperLimit", destinationPosition);
+
+                var currentPosition = piston.CurrentPosition;
+
+                //move the rotor to within the limits
+                if (currentPosition == destinationPosition)
+                {
+                    // Stop piston
+                    piston.SetValueFloat("Velocity", 0);
+                    return true;
+                }
+                else if (currentPosition < destinationPosition)
+                {
+                    piston.SetValueFloat("Velocity", speed);
+                    return false;
+                }
+                else if (currentPosition > destinationPosition)
+                {
+                    piston.SetValueFloat("Velocity", -speed);
+                    return false;
+                }
+
+                return false;
+            }
+        }
     }
+    #endregion
 }
+
+
