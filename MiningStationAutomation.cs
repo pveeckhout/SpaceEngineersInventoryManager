@@ -14,6 +14,7 @@ namespace SpaceEngineersScripts
         IMyGridTerminalSystem GridTerminalSystem;
         IMyProgrammableBlock Me { get; }
         private void Echo(string message) { }
+        private string Storage;
         #endregion
 
         /*
@@ -53,7 +54,6 @@ namespace SpaceEngineersScripts
         private List<IMyTextPanel> OutputPanels { get; set; }
         private List<IMyTerminalBlock> Refineries { get; set; }
         private List<IMyTerminalBlock> CargoContainers { get; set; }
-
 
         private bool movingToPosition = false;
         private int currentCircle = -1;
@@ -838,6 +838,36 @@ namespace SpaceEngineersScripts
             }
 
         }
+        double GetDistanceFromAsteroid()
+        {
+            var sensor = GridTerminalSystem.GetBlockWithName("Pit Floor Sensor") as IMySensorBlock;
+            var entity = sensor.LastDetectedEntity;
+
+            var list = new List<ITerminalProperty>();
+            sensor.GetProperties(list);
+            foreach (var item in list)
+            {
+                Echo(item.Id + " : " + item.TypeName);
+            }
+
+            sensor.GetValue<Single>("bottom");
+           
+            if (entity != null)
+            {
+                var position = sensor.LastDetectedEntity.GetPosition();
+                var sensorPosition = sensor.GetPosition();
+
+                var distance = VRageMath.Vector3D.Distance(position, sensorPosition);
+                Echo(string.Format("Found entity at distance: {0}", distance));
+                // do stuff
+                return distance;
+            }
+            else
+            {
+                Echo(string.Format("Found no entity"));
+                return double.PositiveInfinity;
+            }
+        }
         #endregion
 
         /*
@@ -845,5 +875,74 @@ namespace SpaceEngineersScripts
         * COPY TO HERE
         *
         */
+
+        float currentBottom = 1;
+        float firstDetectBottom = float.NegativeInfinity;
+
+        void Main()
+        {
+            var sensor = GridTerminalSystem.GetBlockWithName("Sensor") as IMySensorBlock;
+            var entity = sensor.LastDetectedEntity;
+            sensor.SetValueFloat("Bottom", currentBottom);
+
+            if (entity != null)
+            {
+                var position = sensor.LastDetectedEntity.GetPosition();
+                var sensorPosition = sensor.GetPosition();
+
+                // do stuff 
+                if (firstDetectBottom == float.NegativeInfinity)
+                {
+                    firstDetectBottom = currentBottom;
+                }
+            }
+            else
+            {
+                Echo(string.Format("Found no entity, increasing sensor.Bottom from {0} to {1}", sensor.GetValueFloat("Bottom"), sensor.GetValueFloat("Bottom") + 0.1f));
+                currentBottom += 0.1f;
+            }
+
+            Echo("sensor first detect bottom: " + firstDetectBottom);
+        }
+
+        double playerMinDetect = double.NegativeInfinity;
+        double playerMaxDetect = double.PositiveInfinity;
+
+        void Main2()
+        {
+            var sensor = GridTerminalSystem.GetBlockWithName("Sensor") as IMySensorBlock;
+            sensor.SetValueFloat("Bottom", currentBottom);
+            var entity = sensor.LastDetectedEntity;
+
+            if (entity != null)
+            {
+                var position = sensor.LastDetectedEntity.GetPosition();
+                var sensorPosition = sensor.GetPosition();
+                var delta = VRageMath.Vector3D.Distance(position, sensorPosition);
+                if (delta < playerMinDetect)
+                    playerMinDetect = delta;
+
+                if (delta > playerMaxDetect)
+                    playerMaxDetect = delta;
+            }
+            else
+            {
+                Echo(string.Format("Found no entity"));
+            }
+
+            Echo("palyer closest detect: {0}" + playerMinDetect);
+            Echo("palyer fartest detect: {0}" + playerMaxDetect);
+        }
+
+        void Main3()
+        {
+            var drill = GridTerminalSystem.GetBlockWithName("Drill") as IMyShipDrill
+            var list = new List<ITerminalProperty>();
+            drill.GetProperties(list);
+            foreach (var item in list)
+            {
+                Echo(item.Id + " : " + item.TypeName);
+            }
+        }
     }
 }
