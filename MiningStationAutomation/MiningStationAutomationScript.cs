@@ -55,9 +55,31 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class InitState : State
         {
-            public override void Handle(DrillStation context)
+            public InitState()
             {
+                if (INIT_FLATTENING)
+                {
+                    nextState = new InitFlatteningState();
+                }
+                else
+                {
+                    nextState = new DrillingState();
+                }
+            }
 
+            protected override bool Drill()
+            {
+                throw new NotImplementedException();
+            }
+
+            protected override bool ToEnd()
+            {
+                throw new NotImplementedException();
+            }
+
+            protected override bool ToStart()
+            {
+                throw new NotImplementedException();
             }
         }
 
@@ -110,7 +132,23 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         abstract class State
         {
-            public abstract void Handle(DrillStation context);
+            protected State nextState;
+
+            protected int CurrentCircle { get; private set; }
+
+            public virtual void Handle(DrillStation context)
+            {
+                if (ToStart() && Drill() && ToEnd())
+                {
+                    context.State = nextState;
+                }
+            }
+
+            protected abstract bool ToStart();
+
+            protected abstract bool Drill();
+
+            protected abstract bool ToEnd();
         }
 
         /// <summary>
@@ -119,17 +157,14 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         class DrillStation
         {
             private State _state;
-            private IMyGridTerminalSystem _gridTerminalSystem;
             private DrillStationBlocks _drillStationBlocks;
 
             // Constructor
             public DrillStation(IMyGridTerminalSystem GridTerminalSystem)
             {
-                this._gridTerminalSystem = GridTerminalSystem;
-
-                //get the state from storage
                 if (Storage.Contains("StateName"))
                 {
+                    //get the state from storage
                     var entries = Storage.Split(new string[] { ";" }, StringSplitOptions.RemoveEmptyEntries);
 
                     entries.ForEach(entry =>
@@ -172,6 +207,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     this.State = new InitState();
                 }
 
+                //build the station blocks
                 this._drillStationBlocks = new DrillStationBlocks(GridTerminalSystem);
             }
 
@@ -180,12 +216,6 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 get { return _state; }
                 set { _state = value; }
-            }
-
-            // Gets the GridTerminalSystem
-            public IMyGridTerminalSystem GridTerminalSystem
-            {
-                get { return _gridTerminalSystem; }
             }
 
             // Gets the DrillStationBlocks
