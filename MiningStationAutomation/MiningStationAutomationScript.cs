@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 
 namespace SpaceEngineersScripts.MiningStationAutomation
 {
-    //TODO: use persistant storage
     //TODO: output to debug
     class MiningStationAutomationScript
     {
@@ -52,6 +51,9 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             }
 
             station.Request();
+
+            Storage = station.State.GetStateDTO(station).ToString();
+            Echo(string.Format("Storage:\n{0}", Storage));
         }
 
         /// <summary>
@@ -59,6 +61,11 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class InitState : State
         {
+            public StateDTO GetStateDTO(Context context)
+            {
+                return new StateDTO(this.GetType().ToString(), -1, -1);
+            }
+
             public void Handle(Context context)
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
@@ -108,24 +115,39 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
 
-                //move to the start position (pistons at 1m/s rotor at 4 rpm)
-                if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                //if the storage contains state info, load it.
+                var storage = (context as DrillStation).PersistantStorage;
+                if (storage.Contains("state="))
                 {
-                    //when done proceed to the next state
-                    if (INIT_FLATTENING)
+                    context.State = new StateDTO(storage).BuildState();
+                }
+                else {
+                    //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                     {
-                        context.State = new FlatteningState(0);
-                    }
-                    else
-                    {
-                        context.State = new DeepeningState();
+                        //when done proceed to the next state
+                        if (INIT_FLATTENING)
+                        {
+                            context.State = new FlatteningState(0);
+                        }
+                        else
+                        {
+                            context.State = new DeepeningState();
+                        }
                     }
                 }
             }
 
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                //nothing to do here
+                return;
+            }
+
             public string Status(Context context)
             {
-                return "INIT";
+                //leave blank
+                return "";
             }
         }
 
@@ -135,7 +157,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         class FlatteningState : State
         {
             private int currentCircle = 0;
-            protected readonly float depth;
+            private float depth;
 
             /// <summary>
             /// initializes a new FlatteningState
@@ -144,6 +166,11 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             public FlatteningState(float targetDepth)
             {
                 this.depth = targetDepth;
+            }
+
+            public StateDTO GetStateDTO(Context context)
+            {
+                return new StateDTO(this.GetType().ToString(), currentCircle, depth);
             }
 
             public void Handle(Context context)
@@ -180,10 +207,17 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 }
                 else
                 {
-                    //move to the start position (pistons at 1m/s rotor at 4 rpm)
-                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                    //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                     {
-                        context.State = new DeepeningState();
+                        if (depth != TARGET_DEPTH)
+                        {
+                            context.State = new DeepeningState();
+                        }
+                        else
+                        {
+                            context.State = new DoneState();
+                        }
                     }
                 }
             }
@@ -191,6 +225,12 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             public string Status(Context context)
             {
                 return string.Format("Flattening [{0}/{1}] ({2:0.##}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
+            }
+
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                this.currentCircle = stateDTO.Circle;
+                this.depth = stateDTO.Depth;
             }
         }
 
@@ -202,6 +242,17 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             private int currentCircle = 0;
             private bool depthReached = true;
 
+            public StateDTO GetStateDTO(Context context)
+            {
+                return new StateDTO(this.GetType().ToString(), currentCircle, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
+            }
+
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                currentCircle = stateDTO.Circle;
+                //TODO depth
+            }
+
             public void Handle(Context context)
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
@@ -211,19 +262,10 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 {
                     if (depthReached)
                     {
-                        //move to the start position (pistons at 1m/s rotor at 4 rpm)
-                        if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                        //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                        if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, 0, 1))
                         {
-                            //if start reached, move to drill radius
-                            if (BlockUtils.MovePistonsToPosition(drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1))
-                            {
-                                depthReached = false;
-                            }
-                            else
-                            {
-                                //if not at drill radius, break excecution
-                                return;
-                            }
+                            depthReached = false;
                         }
                         else
                         {
@@ -246,8 +288,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     }
                 }
                 else {
-                    //move to the start position (pistons at 1m/s rotor at 4 rpm)
-                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                    //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                     {
                         //when done proceed to the next state
                         if (END_FLATTENING)
@@ -273,12 +315,17 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class DoneState : State
         {
+            public StateDTO GetStateDTO(Context context)
+            {
+                return new StateDTO(this.GetType().ToString(), -1, -1);
+            }
+
             public void Handle(Context context)
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
-                //move to the start position (pistons at 1m/s rotor at 4 rpm)
-                if (!drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                if (!drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                     return;
 
                 //turn off all panels
@@ -346,6 +393,11 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 }
             }
 
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                return;
+            }
+
             public string Status(Context context)
             {
                 return "DONE";
@@ -357,8 +409,109 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         interface State
         {
+            /// <summary>
+            /// handle the context in order to move to the next state.
+            /// </summary>
+            /// <param name="context"></param>
             void Handle(Context context);
+
+            /// <summary>
+            /// retrieves a friendly status message
+            /// </summary>
+            /// <param name="context"></param>
             string Status(Context context);
+
+            /// <summary>
+            /// gets the stateDTO based on the current variables
+            /// </summary>
+            /// <param name="context"></param>
+            StateDTO GetStateDTO(Context context);
+
+            /// <summary>
+            /// sets the state to a point contained in the DTO
+            /// </summary>
+            /// <param name="stateDTO"></param>
+            void LoadFromStateDTO(StateDTO stateDTO);
+        }
+
+        class StateDTO
+        {
+            public string State { get; private set; }
+            public int Circle { get; private set; }
+            public float Depth { get; private set; }
+
+            public StateDTO(string state, int circle, float depth)
+            {
+                State = state;
+                Circle = circle;
+                Depth = depth;
+            }
+
+            /// <summary>
+            /// builds the DTO info from a string value
+            /// </summary>
+            /// <param name="persistantStorage"></param>
+            public StateDTO(string persistantStorage)
+            {
+                var keyValues = persistantStorage.Split(new string[] { "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var keyValue in keyValues)
+                {
+                    var key = keyValue.Split('=')[0];
+                    var value = keyValue.Split('=')[1];
+
+                    switch (key)
+                    {
+                        case "state":
+                            State = value;
+                            break;
+                        case "circle":
+                            Circle = int.Parse(value);
+                            break;
+                        case "depth":
+                            Depth = float.Parse(value);
+                            break;
+                    }
+                }
+            }
+
+            /// <summary>
+            /// formats the DTO to display as a string, also used in persistant storage
+            /// </summary>
+            /// <returns></returns>
+            public override string ToString()
+            {
+                return string.Format("state={0}\ncircle={1}\ndepth={2}", State, Circle, Depth);
+            }
+
+            /// <summary>
+            /// returns a build state from the DTO
+            /// </summary>
+            /// <returns></returns>
+            public State BuildState()
+            {
+                State targetState;
+
+                switch (State)
+                {
+                    case "FlatteningState":
+                        targetState = new FlatteningState(0);
+                        break;
+                    case "DeepeningState":
+                        targetState = new DeepeningState();
+                        break;
+                    case "DoneState":
+                        targetState = new DoneState();
+                        break;
+                    default:
+                        targetState = new InitState();
+                        break;
+                }
+
+                targetState.LoadFromStateDTO(this);
+
+                return targetState;
+            }
         }
 
         abstract class Context
@@ -387,61 +540,27 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         class DrillStation : Context
         {
             private DrillStationBlocks _drillStationBlocks;
+            public string _storage;
 
             // Constructor
             public DrillStation(IMyGridTerminalSystem GridTerminalSystem, string storage)
             {
-                //TODO: use persistant storage
-                /*if (storage.Contains("StateName"))
-                {
-                    //get the state from storage
-                    var entries = storage.Split(new string[] { ";" }, StringSplitOptions.RemoveEmptyEntries);
-
-                    entries.ForEach(entry =>
-                    {
-                        if (entry.Contains("StateName"))
-                        {
-                            var stateName = entry.Split('=')[1];
-
-                            Echo(string.Format("Found State {0} persisted in Storage with key 'StateName', using to init", stateName));
-
-                            switch (stateName)
-                            {
-                                case "InitState":
-                                    this.State = new InitState();
-                                    break;
-                                case "InitFlatteningState":
-                                    this.State = new FlatteningState(0);
-                                    break;
-                                case "DeepeningState":
-                                    this.State = new DeepeningState();
-                                    break;
-                                case "EndFlatteningState":
-                                    this.State = new FlatteningState(TARGET_DEPTH);
-                                    break;
-                                case "DoneState":
-                                    this.State = new DoneState();
-                                    break;
-                                default:
-                                    Echo(string.Format("StateName {0} was not recognized as a State, using default InitState", stateName));
-                                    //init is the default state
-                                    this.State = new InitState();
-                                    break;
-                            }
-                        }
-                    });
-                }
-                else
-                {
-                    //init is the default state
-                    State = new InitState();
-                }*/
-
                 //init is the default state
                 State = new InitState();
 
+                //store the storage
+                this._storage = storage;
+
                 //build the station blocks
                 this._drillStationBlocks = new DrillStationBlocks(GridTerminalSystem);
+            }
+
+            public string PersistantStorage
+            {
+                get
+                {
+                    return _storage;
+                }
             }
 
             // Gets the DrillStationBlocks
@@ -537,19 +656,16 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public bool ToPosition(List<IMyPistonBase> pistons1, float pistons1position, float speed1, List<IMyPistonBase> pistons2, float pistons2position, float speed2, IMyMotorAdvancedStator rotor, float rotorPosition, float rpm)
             {
-                //move the vPistons to 0 with speed of 1m/s
                 if (!BlockUtils.MovePistonsToPosition(pistons1, pistons1position, speed1))
                 {
                     return false;
                 }
 
-                //move the hPistons to 0 with speed of 1m/s
                 if (!BlockUtils.MovePistonsToPosition(pistons2, pistons2position, speed2))
                 {
                     return false;
                 }
 
-                //move the rotor to 0 degree on circles, with 4 RPM
                 if (!BlockUtils.MoveRotorToPosition(rotor, rotorPosition, rpm))
                 {
                     return false;
