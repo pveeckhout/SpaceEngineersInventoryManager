@@ -13,7 +13,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
     {
         #region programming environment essential inits, DO NOT COPY TO GAME
         IMyGridTerminalSystem GridTerminalSystem;
-        IMyProgrammableBlock Me { get; }
+        private static IMyProgrammableBlock Me { get; }
         private static void Echo(string message) { }
         private static string Storage;
         #endregion
@@ -30,6 +30,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         const bool END_FLATTENING = true; //flatten pit bottom to allow cars to drive more easily;
 
         //BLOCK SETUP
+        const string TIMER_NAME = "Timer";
         const string ROTOR_NAME = "Drill Rotor";
         const string H_PISTON_NAME = "Horizontal Piston";
         const string V_PISTON_NAME = "Vertical Piston";
@@ -58,6 +59,11 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             public void Handle(Context context)
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //turn on the timer block and set the interval, also start the timer
+                drillStationBlocks.Timer.GetActionWithName("OnOff_On").Apply(drillStationBlocks.Timer);
+                drillStationBlocks.Timer.SetValueFloat("TriggerDelay", 1);
+                drillStationBlocks.Timer.GetActionWithName("Start").Apply(drillStationBlocks.Timer);
 
                 //turn on all antenna
                 drillStationBlocks.Antennas.ForEach(block =>
@@ -104,28 +110,24 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
 
-                //move the vertical pistons to fully retrackted with 1m/s speed
-                if (BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, 0, 1))
+                //move to the start position (pistons at 1m/s rotor at 4 rpm)
+                if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
                 {
-                    //move the horizontal pistons to fully retrackted with 1m/s speed
-                    if (BlockUtils.MovePistonsToPosition(drillStationBlocks.HorizontalPiston, 0, 1))
+                    //when done proceed to the next state
+                    if (INIT_FLATTENING)
                     {
-                        //move the rotor to 0 degree with 1rpm
-                        if (BlockUtils.MoveRotorToPosition(drillStationBlocks.Rotor, 0, 1))
-                        {
-                            //when doen proceed to the next state
-                            if (INIT_FLATTENING)
-                            {
-                                context.State = new FlatteningState(0);
-                            }
-                            else
-                            {
-                                context.State = new DeepeningState();
-                            }
-                        }
-
+                        context.State = new FlatteningState(0);
+                    }
+                    else
+                    {
+                        context.State = new DeepeningState();
                     }
                 }
+            }
+
+            public string Status(Context context)
+            {
+                return "INIT";
             }
         }
 
@@ -150,35 +152,47 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
-                //move the vPistons to the desired depth with speed of 1m/s
-                if (!BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, depth, 1))
+                //if currentCircle < the number of radii the flatten, else move to start, and proceed to next state
+                if (currentCircle < DRILL_RADII.Count)
                 {
-                    return;
-                }
+                    //move the vPistons to the desired depth with speed of 1m/s
+                    if (!BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, depth, 1))
+                    {
+                        return;
+                    }
 
-                //move the hPistons to the first radius with speed of 1m/s
-                if (!BlockUtils.MovePistonsToPosition(drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1))
-                {
-                    return;
-                }
+                    //move the hPistons to the first radius with speed of 1m/s
+                    if (!BlockUtils.MovePistonsToPosition(drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1))
+                    {
+                        return;
+                    }
 
-                //move the rotor to -360 degree on even circles, to 0 degree on unevem circles, with ROTOR_RPM
-                var targetDegree = (currentCircle % 2 == 0) ? -360 : 0;
-                if (!BlockUtils.MoveRotorToPosition(drillStationBlocks.Rotor, targetDegree, ROTOR_RPM))
-                {
-                    //when it is not there yet, return
-                    return;
+                    //move the rotor to -360 degree on even circles, to 0 degree on unevem circles, with ROTOR_RPM
+                    var targetDegree = (currentCircle % 2 == 0) ? -360 : 0;
+                    if (!BlockUtils.MoveRotorToPosition(drillStationBlocks.Rotor, targetDegree, ROTOR_RPM))
+                    {
+                        //when it is not there yet, return
+                        return;
+                    }
+                    else
+                    {
+                        //if reached the target, increment currentCircle
+                        currentCircle++;
+                    }
                 }
+                else
+                {
+                    //move to the start position (pistons at 1m/s rotor at 4 rpm)
+                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                    {
+                        context.State = new DeepeningState();
+                    }
+                }
+            }
 
-                //if reached the target, increment currentCircle
-                currentCircle++;
-                
-                //if currentCircle == the number of radii, them all the circkles have been done.
-                //proceed to next state
-                if (currentCircle == DRILL_RADII.Count)
-                {
-                    context.State = new DeepeningState();
-                }
+            public string Status(Context context)
+            {
+                return string.Format("Flattening [{0}/{1}] ({2}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
             }
         }
 
@@ -187,9 +201,72 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class DeepeningState : State
         {
+            private int currentCircle = 0;
+            private bool depthReached = true;
+
             public void Handle(Context context)
             {
-                throw new NotImplementedException();
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //if currentCircle < the number of radii the flatten, else move to start, and proceed to next state
+                if (currentCircle < DRILL_RADII.Count)
+                {
+                    if (depthReached)
+                    {
+                        //move to the start position (pistons at 1m/s rotor at 4 rpm)
+                        if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                        {
+                            //if start reached, move to drill radius
+                            if (BlockUtils.MovePistonsToPosition(drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1))
+                            {
+                                depthReached = false;
+                            }
+                            else
+                            {
+                                //if not at drill radius, break excecution
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            //if not at start, break excution
+                            return;
+                        }
+                    }
+
+                    //unlock rotor
+                    BlockUtils.RemoveRotorLimits(drillStationBlocks.Rotor);
+
+                    //set rotor speed
+                    BlockUtils.setRotorSpeed(drillStationBlocks.Rotor, ROTOR_RPM);
+
+                    //move the vPistons down until the depth is reached
+                    if (BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, TARGET_DEPTH, DRILL_DOWN_SPEED))
+                    {
+                        currentCircle++;
+                        depthReached = true;
+                    }
+                }
+                else {
+                    //move to the start position (pistons at 1m/s rotor at 4 rpm)
+                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                    {
+                        //when done proceed to the next state
+                        if (END_FLATTENING)
+                        {
+                            context.State = new FlatteningState(TARGET_DEPTH);
+                        }
+                        else
+                        {
+                            context.State = new DoneState();
+                        }
+                    }
+                }
+            }
+
+            public string Status(Context context)
+            {
+                return string.Format("Drilling [{0}/{1}] ({2}m/{3}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons), TARGET_DEPTH);
             }
         }
 
@@ -200,7 +277,80 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         {
             public void Handle(Context context)
             {
-                throw new NotImplementedException();
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //move to the start position (pistons at 1m/s rotor at 4 rpm)
+                if (!drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 4))
+                    return;
+
+                //turn off all panels
+                drillStationBlocks.DebugPanels.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_Off").Apply(block);
+                });
+
+                //turn off all drills
+                drillStationBlocks.Drills.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_Off").Apply(block);
+                });
+
+                //turn off all hPistons
+                drillStationBlocks.HorizontalPiston.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_Off").Apply(block);
+                });
+
+                //turn off the rotor
+                drillStationBlocks.Rotor.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.Rotor);
+
+                //turn off all vPistons
+                drillStationBlocks.VerticalPistons.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_Off").Apply(block);
+                });
+
+                //if the refineries do not have anything left to refine, turn them off
+                var allRefineriesDone = true;
+                drillStationBlocks.Refineries.ForEach(refinery =>
+                {
+                    var refineryItems = refinery.GetInventory(0).GetItems();
+                    //if there are items in the refinery
+                    if (refineryItems.Count > 0)
+                    {
+                        var stop = true;
+                        refineryItems.ForEach(item =>
+                        {
+                            stop &= item.Amount <= (VRage.MyFixedPoint)0.1f;
+                            allRefineriesDone &= stop;
+                        });
+
+                        if (stop)
+                            refinery.GetActionWithName("OnOff_Off").Apply(refinery);
+                    }
+                    else
+                    {
+                        refinery.GetActionWithName("OnOff_Off").Apply(refinery);
+                    }
+                });
+
+                //if all refineries are done: clean the remaining input and output, stop timer and shutdown script
+                if (allRefineriesDone)
+                {
+                    drillStationBlocks.CleanRefineries(0);
+                    drillStationBlocks.CleanRefineries(1);
+
+                    //timer
+                    drillStationBlocks.Timer.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.Timer);
+
+                    //scriot
+                    drillStationBlocks.ProgrammableBlock.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.ProgrammableBlock);
+                }
+            }
+
+            public string Status(Context context)
+            {
+                return "DONE";
             }
         }
 
@@ -210,6 +360,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         interface State
         {
             void Handle(Context context);
+            string Status(Context context);
         }
 
         abstract class Context
@@ -296,6 +447,16 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 get { return _drillStationBlocks; }
             }
+
+            public override void Request()
+            {
+                base.Request();
+
+                //move the refined goods to the cargo container
+                DrillStationBlocks.CleanRefineries(1);
+
+                BlockUtils.SetStatusToAntennas(DrillStationBlocks.Antennas, State.Status(this));
+            }
         }
 
         public class DrillStationBlocks
@@ -308,10 +469,14 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             public List<IMyTextPanel> DebugPanels { get; set; }
             public List<IMyRefinery> Refineries { get; set; }
             public List<IMyCargoContainer> CargoContainers { get; set; }
+            public IMyTimerBlock Timer { get; set; }
+            public IMyProgrammableBlock ProgrammableBlock { get; set; }
 
             public DrillStationBlocks(IMyGridTerminalSystem GridTerminalSystem)
             {
                 Rotor = GridTerminalSystem.GetBlockWithName(ROTOR_NAME) as IMyMotorAdvancedStator;
+                Timer = GridTerminalSystem.GetBlockWithName(TIMER_NAME) as IMyTimerBlock;
+                ProgrammableBlock = Me;
 
                 //HorizontalPiston 
                 HorizontalPiston = new List<IMyPistonBase>();
@@ -366,6 +531,63 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 var containerTempList = new List<IMyTerminalBlock>();
                 GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(containerTempList);
                 containerTempList.ForEach(antenna => CargoContainers.Add(antenna as IMyCargoContainer));
+            }
+
+            public bool ToPosition(List<IMyPistonBase> pistons1, float pistons1position, float speed1, List<IMyPistonBase> pistons2, float pistons2position, float speed2, IMyMotorAdvancedStator rotor, float rotorPosition, float rpm)
+            {
+                //move the vPistons to 0 with speed of 1m/s
+                if (!BlockUtils.MovePistonsToPosition(pistons1, pistons1position, speed1))
+                {
+                    return false;
+                }
+
+                //move the hPistons to 0 with speed of 1m/s
+                if (!BlockUtils.MovePistonsToPosition(pistons2, pistons2position, speed2))
+                {
+                    return false;
+                }
+
+                //move the rotor to 0 degree on circles, with 4 RPM
+                if (!BlockUtils.MoveRotorToPosition(rotor, rotorPosition, rpm))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            public void CleanRefineries(int refineryInventoryIndex)
+            {
+                foreach (var refinery in Refineries)
+                {
+                    //get the target inventory, 0 is input, 1 is output, else will probably throw error, CBA to check on this
+                    var refineryInventory = refinery.GetInventory(refineryInventoryIndex);
+                    var refineryItems = refineryInventory.GetItems();
+                    IMyInventory targetInventory = null;
+
+                    //if there are items in the refinery
+                    if (refineryItems.Count > 0)
+                    {
+                        //revers loop as we will remove items
+                        for (int i = refineryItems.Count - 1; i >= 0; i--)
+                        {
+                            //loop the containers to find a target
+                            foreach (var cargoContainer in CargoContainers)
+                            {
+                                //if the container is operational and not full it is a valid target
+                                if ((cargoContainer.IsFunctional || cargoContainer.IsWorking) && !cargoContainer.GetInventory(0).IsFull)
+                                {
+                                    targetInventory = cargoContainer.GetInventory(0);
+                                    break;
+                                }
+                            }
+
+                            // transfer items if target is found
+                            if (targetInventory != null)
+                                refineryInventory.TransferItemTo(targetInventory, i);
+                        }
+                    }
+                }
             }
         }
 
