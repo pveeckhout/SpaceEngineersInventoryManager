@@ -12,7 +12,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
     class MiningStationAutomationScript
     {
         #region programming environment essential inits, DO NOT COPY TO GAME
-        IMyGridTerminalSystem GridTerminalSystem;
+        private static IMyGridTerminalSystem GridTerminalSystem;
         private static IMyProgrammableBlock Me { get; }
         private static void Echo(string message) { }
         private static string Storage;
@@ -45,7 +45,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         {
             if (station == null)
             {
-                station = new DrillStation(GridTerminalSystem);
+                station = new DrillStation();
             }
 
             station.Request();
@@ -391,7 +391,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             private DrillStationBlocks _drillStationBlocks;
 
             // Constructor
-            public DrillStation(IMyGridTerminalSystem GridTerminalSystem)
+            public DrillStation()
             {
                 if (Storage.Contains("StateName"))
                 {
@@ -459,7 +459,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             }
         }
 
-        public class DrillStationBlocks
+        class DrillStationBlocks
         {
             public IMyMotorAdvancedStator Rotor { get; set; }
             public List<IMyPistonBase> HorizontalPiston { get; set; }
@@ -591,7 +591,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             }
         }
 
-        public static class BlockUtils
+        class BlockUtils
         {
             /// <summary>
             /// Sets the state to all antena connected on the GridTerminalSystem
@@ -781,8 +781,6 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 return false;
             }
         }
+        #endregion
     }
-    #endregion
 }
-
-
