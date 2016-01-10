@@ -536,7 +536,7 @@ namespace SpaceEngineersScripts
 
             if (DEBUG)
                 OutputToDebug("Initializing blocks");
-
+            
             HorizontalPiston = GridTerminalSystem.GetBlockWithName(H_PISTON_NAME) as IMyPistonBase;
             Rotor = GridTerminalSystem.GetBlockWithName(ROTOR_NAME) as IMyMotorAdvancedStator;
 

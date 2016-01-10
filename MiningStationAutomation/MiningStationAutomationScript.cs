@@ -55,31 +55,77 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class InitState : State
         {
-            public InitState()
+            public void Handle(Context context)
             {
-                if (INIT_FLATTENING)
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //turn on all antenna
+                drillStationBlocks.Antennas.ForEach(block =>
                 {
-                    nextState = new InitFlatteningState();
-                }
-                else
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on all containers
+                drillStationBlocks.CargoContainers.ForEach(block =>
                 {
-                    nextState = new DrillingState();
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on all panels
+                drillStationBlocks.DebugPanels.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on all drills
+                drillStationBlocks.Drills.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on all hPistons
+                drillStationBlocks.HorizontalPiston.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on all refineries
+                drillStationBlocks.Refineries.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on the rotor
+                drillStationBlocks.Rotor.GetActionWithName("OnOff_On").Apply(drillStationBlocks.Rotor);
+
+                //turn on all vPistons
+                drillStationBlocks.VerticalPistons.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //move the vertical pistons to fully retrackted with 1m/s speed
+                if (BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, 0, 1))
+                {
+                    //move the horizontal pistons to fully retrackted with 1m/s speed
+                    if (BlockUtils.MovePistonsToPosition(drillStationBlocks.HorizontalPiston, 0, 1))
+                    {
+                        //move the rotor to 0 degree with 1rpm
+                        if (BlockUtils.MoveRotorToPosition(drillStationBlocks.Rotor, 0, 1))
+                        {
+                            //when doen proceed to the next state
+                            if (INIT_FLATTENING)
+                            {
+                                context.State = new InitFlatteningState();
+                            }
+                            else
+                            {
+                                context.State = new DeepeningState();
+                            }
+                        }
+
+                    }
                 }
-            }
-
-            protected override bool Drill()
-            {
-                throw new NotImplementedException();
-            }
-
-            protected override bool ToEnd()
-            {
-                throw new NotImplementedException();
-            }
-
-            protected override bool ToStart()
-            {
-                throw new NotImplementedException();
             }
         }
 
@@ -88,18 +134,29 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class InitFlatteningState : State
         {
-            public override void Handle(DrillStation context)
+            int currentCircle = 0;
+
+            public void Handle(Context context)
             {
-                throw new NotImplementedException();
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //move the rotor to -360 degree with ROTOR_RPM
+                if (BlockUtils.MoveRotorToPosition(drillStationBlocks.Rotor, -360, ROTOR_RPM))
+                {
+                    //TODO
+                }
+
+                //TODO
+                    throw new NotImplementedException();
             }
         }
 
         /// <summary>
         /// The DrillingState
         /// </summary>
-        class DrillingState : State
+        class DeepeningState : State
         {
-            public override void Handle(DrillStation context)
+            public void Handle(Context context)
             {
                 throw new NotImplementedException();
             }
@@ -110,7 +167,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class EndFlatteningState : State
         {
-            public override void Handle(DrillStation context)
+            public void Handle(Context context)
             {
                 throw new NotImplementedException();
             }
@@ -121,42 +178,45 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class DoneState : State
         {
-            public override void Handle(DrillStation context)
+            public void Handle(Context context)
             {
                 throw new NotImplementedException();
             }
         }
 
         /// <summary>
-        /// The 'State' abstract class
+        /// The 'State' interface
         /// </summary>
-        abstract class State
+        interface State
         {
-            protected State nextState;
+            void Handle(Context context);
+        }
 
-            protected int CurrentCircle { get; private set; }
+        abstract class Context
+        {
+            private State _state;
 
-            public virtual void Handle(DrillStation context)
+            // Gets or sets the state
+            public State State
             {
-                if (ToStart() && Drill() && ToEnd())
-                {
-                    context.State = nextState;
-                }
+                get { return _state; }
+                set { _state = value; }
             }
 
-            protected abstract bool ToStart();
-
-            protected abstract bool Drill();
-
-            protected abstract bool ToEnd();
+            /// <summary>
+            /// 
+            /// </summary>
+            public virtual void Request()
+            {
+                _state.Handle(this);
+            }
         }
 
         /// <summary>
         /// The 'Context' class
         /// </summary>
-        class DrillStation
+        class DrillStation : Context
         {
-            private State _state;
             private DrillStationBlocks _drillStationBlocks;
 
             // Constructor
@@ -183,8 +243,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                                 case "InitFlatteningState":
                                     this.State = new InitFlatteningState();
                                     break;
-                                case "DrillingState":
-                                    this.State = new DrillingState();
+                                case "DeepeningState":
+                                    this.State = new DeepeningState();
                                     break;
                                 case "EndFlatteningState":
                                     this.State = new EndFlatteningState();
@@ -204,32 +264,17 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 else
                 {
                     //init is the default state
-                    this.State = new InitState();
+                    State = new InitState();
                 }
 
                 //build the station blocks
                 this._drillStationBlocks = new DrillStationBlocks(GridTerminalSystem);
             }
 
-            // Gets or sets the state
-            public State State
-            {
-                get { return _state; }
-                set { _state = value; }
-            }
-
             // Gets the DrillStationBlocks
             public DrillStationBlocks DrillStationBlocks
             {
                 get { return _drillStationBlocks; }
-            }
-
-            /// <summary>
-            /// 
-            /// </summary>
-            public void Request()
-            {
-                _state.Handle(this);
             }
         }
 
@@ -446,7 +491,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             /// <param name="pistons"></param>
             /// <param name="destPosition"></param>
             /// <param name="speed"></param>
-            /// <returns>true if the psiton is in position</returns>
+            /// <returns>true if the pistosn is in position</returns>
             public static bool MovePistonsToPosition(List<IMyPistonBase> pistons, float destPosition, float speed)
             {
                 var inPosition = true;
@@ -465,7 +510,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             /// <param name="piston"></param>
             /// <param name="destinationPosition"></param>
             /// <param name="speed"></param>
-            /// <returns>true if the psiton is in position</returns>
+            /// <returns>true if the piston is in position</returns>
             public static bool MovePistonToPosition(IMyPistonBase piston, float destinationPosition, float speed)
             {
                 piston.SetValueFloat("LowerLimit", destinationPosition);
