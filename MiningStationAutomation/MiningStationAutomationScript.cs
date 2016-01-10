@@ -23,7 +23,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         //OPERATIONAL
         const float ROTOR_RPM = 0.5f;
         const float DRILL_DOWN_SPEED = 0.006f;
-        readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
+        static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
         const bool INIT_FLATTENING = true; // safety precaoution
@@ -116,7 +116,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                             //when doen proceed to the next state
                             if (INIT_FLATTENING)
                             {
-                                context.State = new InitFlatteningState();
+                                context.State = new FlatteningState(0);
                             }
                             else
                             {
@@ -130,24 +130,55 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         }
 
         /// <summary>
-        /// The InitFlatteningState
+        /// The FlatteningState
         /// </summary>
-        class InitFlatteningState : State
+        class FlatteningState : State
         {
-            int currentCircle = 0;
+            private int currentCircle = 0;
+            protected readonly float depth;
+
+            /// <summary>
+            /// initializes a new FlatteningState
+            /// </summary>
+            /// <param name="targetDepth"> the depth on wich the flattening needs to happen</param>
+            public FlatteningState(float targetDepth)
+            {
+                this.depth = targetDepth;
+            }
 
             public void Handle(Context context)
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
-                //move the rotor to -360 degree with ROTOR_RPM
-                if (BlockUtils.MoveRotorToPosition(drillStationBlocks.Rotor, -360, ROTOR_RPM))
+                //move the vPistons to the desired depth with speed of 1m/s
+                if (!BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, depth, 1))
                 {
-                    //TODO
+                    return;
                 }
 
-                //TODO
-                    throw new NotImplementedException();
+                //move the hPistons to the first radius with speed of 1m/s
+                if (!BlockUtils.MovePistonsToPosition(drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1))
+                {
+                    return;
+                }
+
+                //move the rotor to -360 degree on even circles, to 0 degree on unevem circles, with ROTOR_RPM
+                var targetDegree = (currentCircle % 2 == 0) ? -360 : 0;
+                if (!BlockUtils.MoveRotorToPosition(drillStationBlocks.Rotor, targetDegree, ROTOR_RPM))
+                {
+                    //when it is not there yet, return
+                    return;
+                }
+
+                //if reached the target, increment currentCircle
+                currentCircle++;
+                
+                //if currentCircle == the number of radii, them all the circkles have been done.
+                //proceed to next state
+                if (currentCircle == DRILL_RADII.Count)
+                {
+                    context.State = new DeepeningState();
+                }
             }
         }
 
@@ -155,17 +186,6 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// The DrillingState
         /// </summary>
         class DeepeningState : State
-        {
-            public void Handle(Context context)
-            {
-                throw new NotImplementedException();
-            }
-        }
-
-        /// <summary>
-        /// The EndFlattening State
-        /// </summary>
-        class EndFlatteningState : State
         {
             public void Handle(Context context)
             {
@@ -241,13 +261,13 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                                     this.State = new InitState();
                                     break;
                                 case "InitFlatteningState":
-                                    this.State = new InitFlatteningState();
+                                    this.State = new FlatteningState(0);
                                     break;
                                 case "DeepeningState":
                                     this.State = new DeepeningState();
                                     break;
                                 case "EndFlatteningState":
-                                    this.State = new EndFlatteningState();
+                                    this.State = new FlatteningState(TARGET_DEPTH);
                                     break;
                                 case "DoneState":
                                     this.State = new DoneState();
