@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 
 namespace SpaceEngineersScripts.MiningStationAutomation
 {
+    //TODO: use persistant storage
+    //TODO: output to debug
     class MiningStationAutomationScript
     {
         #region programming environment essential inits, DO NOT COPY TO GAME
@@ -26,11 +28,12 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
-        const bool INIT_FLATTENING = true; // safety precaoution
+        const bool INIT_FLATTENING = true; //safety precaution
         const bool END_FLATTENING = true; //flatten pit bottom to allow cars to drive more easily;
 
         //BLOCK SETUP
         const string TIMER_NAME = "Timer";
+        const string PROGRAMMABLEBLOCK_NAME = "Programmable Block";
         const string ROTOR_NAME = "Drill Rotor";
         const string H_PISTON_NAME = "Horizontal Piston";
         const string V_PISTON_NAME = "Vertical Piston";
@@ -45,7 +48,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         {
             if (station == null)
             {
-                station = new DrillStation();
+                station = new DrillStation(GridTerminalSystem, Storage);
             }
 
             station.Request();
@@ -71,17 +74,12 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
 
-                //turn on all containers
-                drillStationBlocks.CargoContainers.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_On").Apply(block);
-                });
-
                 //turn on all panels
                 drillStationBlocks.DebugPanels.ForEach(block =>
                 {
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
+
 
                 //turn on all drills
                 drillStationBlocks.Drills.ForEach(block =>
@@ -192,7 +190,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public string Status(Context context)
             {
-                return string.Format("Flattening [{0}/{1}] ({2}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
+                return string.Format("Flattening [{0}/{1}] ({2:0.##}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
             }
         }
 
@@ -266,7 +264,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public string Status(Context context)
             {
-                return string.Format("Drilling [{0}/{1}] ({2}m/{3}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons), TARGET_DEPTH);
+                return string.Format("Drilling [{0}/{1}] ({2:0.##}m/{3:0.##}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons), TARGET_DEPTH);
             }
         }
 
@@ -391,12 +389,13 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             private DrillStationBlocks _drillStationBlocks;
 
             // Constructor
-            public DrillStation()
+            public DrillStation(IMyGridTerminalSystem GridTerminalSystem, string storage)
             {
-                if (Storage.Contains("StateName"))
+                //TODO: use persistant storage
+                /*if (storage.Contains("StateName"))
                 {
                     //get the state from storage
-                    var entries = Storage.Split(new string[] { ";" }, StringSplitOptions.RemoveEmptyEntries);
+                    var entries = storage.Split(new string[] { ";" }, StringSplitOptions.RemoveEmptyEntries);
 
                     entries.ForEach(entry =>
                     {
@@ -436,7 +435,10 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 {
                     //init is the default state
                     State = new InitState();
-                }
+                }*/
+
+                //init is the default state
+                State = new InitState();
 
                 //build the station blocks
                 this._drillStationBlocks = new DrillStationBlocks(GridTerminalSystem);
@@ -476,7 +478,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 Rotor = GridTerminalSystem.GetBlockWithName(ROTOR_NAME) as IMyMotorAdvancedStator;
                 Timer = GridTerminalSystem.GetBlockWithName(TIMER_NAME) as IMyTimerBlock;
-                ProgrammableBlock = Me;
+                ProgrammableBlock = GridTerminalSystem.GetBlockWithName(PROGRAMMABLEBLOCK_NAME) as IMyProgrammableBlock;
 
                 //HorizontalPiston 
                 HorizontalPiston = new List<IMyPistonBase>();
@@ -530,7 +532,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 CargoContainers = new List<IMyCargoContainer>();
                 var containerTempList = new List<IMyTerminalBlock>();
                 GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(containerTempList);
-                containerTempList.ForEach(antenna => CargoContainers.Add(antenna as IMyCargoContainer));
+                containerTempList.ForEach(container => CargoContainers.Add(container as IMyCargoContainer));
             }
 
             public bool ToPosition(List<IMyPistonBase> pistons1, float pistons1position, float speed1, List<IMyPistonBase> pistons2, float pistons2position, float speed2, IMyMotorAdvancedStator rotor, float rotorPosition, float rpm)
@@ -638,7 +640,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 }
                 else
                 {
-                    Echo("The rotor position could not parsed");
+                    //Echo("The rotor position could not parsed");
                     throw new FormatException("The rotor position could not parsed");
                 }
                 return float.Parse(currentposition);
@@ -700,7 +702,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 //warn for fuckery if settin values possible out of bounds when not obviously meant to be that way
                 if ((lower < -360 && lower != float.NegativeInfinity) || (upper > 360 && upper != float.PositiveInfinity))
                 {
-                    Echo("[WARN] Setting Rotor limits is doing wierd stuff around or beyond the 360 degree mark, often SE interprets this as infinity");
+                    //Echo("[WARN] Setting Rotor limits is doing wierd stuff around or beyond the 360 degree mark, often SE interprets this as infinity");
                 }
 
                 rotor.SetValueFloat("LowerLimit", lower);
