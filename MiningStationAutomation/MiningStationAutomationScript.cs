@@ -24,7 +24,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         #region Config
         //OPERATIONAL
         const float ROTOR_RPM = 0.5f;
-        const float DRILL_DOWN_SPEED = 0.006f;
+        const float DRILL_DOWN_SPEED = 0.008f; //discovered that .008 is still not to fast for the drill down speed
         static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
