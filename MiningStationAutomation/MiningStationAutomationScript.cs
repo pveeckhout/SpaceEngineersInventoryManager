@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 namespace SpaceEngineersScripts.MiningStationAutomation
 {
+    //TODO: fix FlatteningState.Handle
     //TODO: output to debug
     class MiningStationAutomationScript
     {
@@ -27,8 +28,9 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
-        const bool INIT_FLATTENING = true; //safety precaution
-        const bool END_FLATTENING = true; //flatten pit bottom to allow cars to drive more easily;
+        const bool INIT_FLATTENING = false; //safety precaution
+        const bool END_FLATTENING = false; //flatten pit bottom to allow cars to drive more easily;
+        const float VERTICAL_OFFSET = 0f;
 
         //BLOCK SETUP
         const string TIMER_NAME = "Timer";
@@ -43,8 +45,13 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
         DrillStation station = null;
 
-        void Main()
+        void Main(string arg)
         {
+            if (arg.Contains("reseststorage=true"))
+            {
+                Storage = "";
+            }
+
             if (station == null)
             {
                 station = new DrillStation(GridTerminalSystem, Storage);
@@ -63,7 +70,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         {
             public StateDTO GetStateDTO(Context context)
             {
-                return new StateDTO(this.GetType().ToString(), -1, -1);
+                return new StateDTO(typeof(InitState).Name, -1, -1);
             }
 
             public void Handle(Context context)
@@ -128,7 +135,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                         //when done proceed to the next state
                         if (INIT_FLATTENING)
                         {
-                            context.State = new FlatteningState(0);
+                            context.State = new FlatteningState(VERTICAL_OFFSET);
                         }
                         else
                         {
@@ -147,7 +154,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             public string Status(Context context)
             {
                 //leave blank
-                return "";
+                return "INIT";
             }
         }
 
@@ -170,7 +177,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public StateDTO GetStateDTO(Context context)
             {
-                return new StateDTO(this.GetType().ToString(), currentCircle, depth);
+                return new StateDTO(typeof(FlatteningState).Name, currentCircle, depth);
             }
 
             public void Handle(Context context)
@@ -180,28 +187,11 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 //if currentCircle < the number of radii the flatten, else move to start, and proceed to next state
                 if (currentCircle < DRILL_RADII.Count)
                 {
-                    //move the vPistons to the desired depth with speed of 1m/s
-                    if (!BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, depth, 1))
-                    {
-                        return;
-                    }
-
-                    //move the hPistons to the first radius with speed of 1m/s
-                    if (!BlockUtils.MovePistonsToPosition(drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1))
-                    {
-                        return;
-                    }
-
                     //move the rotor to -360 degree on even circles, to 0 degree on unevem circles, with ROTOR_RPM
                     var targetDegree = (currentCircle % 2 == 0) ? -360 : 0;
-                    if (!BlockUtils.MoveRotorToPosition(drillStationBlocks.Rotor, targetDegree, ROTOR_RPM))
+                    if ((drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, depth, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, targetDegree, ROTOR_RPM)))
                     {
-                        //when it is not there yet, return
-                        return;
-                    }
-                    else
-                    {
-                        //if reached the target, increment currentCircle
+                        //when it is not there
                         currentCircle++;
                     }
                 }
@@ -224,7 +214,14 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public string Status(Context context)
             {
-                return string.Format("Flattening [{0}/{1}] ({2:0.##}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
+                if (currentCircle == DRILL_RADII.Count)
+                {
+                    return "Flattening DONE";
+                }
+                else
+                {
+                    return string.Format("Flattening [{0}/{1}] ({2:0.##}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
+                }
             }
 
             public void LoadFromStateDTO(StateDTO stateDTO)
@@ -241,16 +238,21 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         {
             private int currentCircle = 0;
             private bool depthReached = true;
+            private float verticalOffset = VERTICAL_OFFSET;
 
             public StateDTO GetStateDTO(Context context)
             {
-                return new StateDTO(this.GetType().ToString(), currentCircle, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
+                return new StateDTO(typeof(DeepeningState).Name, currentCircle, depthReached ? verticalOffset : BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
             }
 
             public void LoadFromStateDTO(StateDTO stateDTO)
             {
                 currentCircle = stateDTO.Circle;
-                //TODO depth
+
+                //we need to know how much the drills drop per round to build in safety margin
+                var safetyMargin = 60 * DRILL_DOWN_SPEED / ROTOR_RPM;
+
+                verticalOffset = stateDTO.Depth - safetyMargin;
             }
 
             public void Handle(Context context)
@@ -263,7 +265,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     if (depthReached)
                     {
                         //move to the start position (pistons at 1m/s rotor at 1 rpm)
-                        if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, 0, 1))
+                        if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, verticalOffset, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, 0, 1))
                         {
                             depthReached = false;
                         }
@@ -284,6 +286,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     if (BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, TARGET_DEPTH, DRILL_DOWN_SPEED))
                     {
                         currentCircle++;
+                        verticalOffset = VERTICAL_OFFSET;
                         depthReached = true;
                     }
                 }
@@ -306,7 +309,14 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public string Status(Context context)
             {
-                return string.Format("Drilling [{0}/{1}] ({2:0.##}m/{3:0.##}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons), TARGET_DEPTH);
+                if (currentCircle == DRILL_RADII.Count)
+                {
+                    return "Drilling DONE";
+                }
+                else
+                {
+                    return string.Format("Drilling [{0}/{1}] ({2:0.##}m/{3:0.##}m)", currentCircle + 1, DRILL_RADII.Count, depthReached ? verticalOffset : BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons), TARGET_DEPTH);
+                }
             }
         }
 
@@ -317,7 +327,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         {
             public StateDTO GetStateDTO(Context context)
             {
-                return new StateDTO(this.GetType().ToString(), -1, -1);
+                return new StateDTO(typeof(DoneState).Name, -1, -1);
             }
 
             public void Handle(Context context)
