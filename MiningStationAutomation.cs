@@ -11,7 +11,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 {
     //TODO: fix FlatteningState.Handle
     //TODO: output to debug
-    class MiningStationAutomationScript
+    class MiningStationAutomation
     {
         #region programming environment essential inits, DO NOT COPY TO GAME
         private static IMyGridTerminalSystem GridTerminalSystem;
