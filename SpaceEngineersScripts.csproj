@@ -74,9 +74,8 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="MiningStationAutomation.cs" />
     <Compile Include="InventoryManager.cs" />
-    <Compile Include="MiningStationAutomation\MiningStationAutomationScript.cs" />
+    <Compile Include="MiningStationAutomation.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
