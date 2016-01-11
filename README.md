@@ -1,19 +1,15 @@
-# SpaceEngineersInventoryManager
+# SpaceEngineersScripts 
 
-This script will be used on our private server to make our own life it bit easier.
+These scripts will be used on our private server to make our own life it bit easier.
 
-## script content
+## Invemtory Manager
 
-### planned
+Discontinued: we moved to use Taleden's Inventory Manager (http://forum.keenswh.com/threads/taledens-inventory-manager.7371928/)
 
-### done
+## SolarManager
 
-* keep assemblers clean
-* sort items
-* distribute uranium in reactors
-* automatic refinering
-* automatic assembly
+TODO
 
-## how to used
+## MiningStationAutomation
 
-to add once coded
+TODO
