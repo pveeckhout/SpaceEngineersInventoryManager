@@ -3,40 +3,38 @@ using Sandbox.ModAPI.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.Serialization;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace SpaceEngineersScripts
+namespace SpaceEngineersScripts.MiningStationAutomation
 {
+    //TODO: fix FlatteningState.Handle
+    //TODO: output to debug
     class MiningStationAutomation
     {
         #region programming environment essential inits, DO NOT COPY TO GAME
-        IMyGridTerminalSystem GridTerminalSystem;
-        IMyProgrammableBlock Me { get; }
-        private void Echo(string message) { }
+        private static IMyGridTerminalSystem GridTerminalSystem;
+        private static IMyProgrammableBlock Me { get; }
+        private static void Echo(string message) { }
+        private static string Storage;
         #endregion
 
-        /*
-        *
-        * COPY FROM HERE
-        *
-        */
-
-        //TODO: fix shutdown trigger
-        //TODO: fix percentage done
-        //TODO: fix ETA
         #region Programmable block script
         #region Config
         //OPERATIONAL
         const float ROTOR_RPM = 0.5f;
-        const float DRILL_DOWN_SPEED = 0.006f;
-        readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
+        const float DRILL_DOWN_SPEED = 0.008f; //discovered that .008 is still not to fast for the drill down speed
+        static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
-        const bool INIT_FLATTENING = true; // safety precaution
-        const bool END_FLATTENING = true; //flatten pit bottom to allow cars to drive more easily;
+        const bool INIT_FLATTENING = false; //safety precaution
+        const bool END_FLATTENING = false; //flatten pit bottom to allow cars to drive more easily;
+        const float VERTICAL_OFFSET = 0f;
 
         //BLOCK SETUP
+        const string TIMER_NAME = "Timer";
+        const string PROGRAMMABLEBLOCK_NAME = "Programmable Block";
         const string ROTOR_NAME = "Drill Rotor";
         const string H_PISTON_NAME = "Horizontal Piston";
         const string V_PISTON_NAME = "Vertical Piston";
@@ -45,805 +43,872 @@ namespace SpaceEngineersScripts
         const float TARGET_DEPTH = 20f;
         #endregion
 
-        private IMyPistonBase HorizontalPiston { get; set; }
-        private List<IMyPistonBase> VerticalPistons { get; set; }
-        private List<IMyShipDrill> Drills { get; set; }
-        private IMyMotorAdvancedStator Rotor { get; set; }
-        private List<IMyRadioAntenna> Antennas { get; set; }
-        private List<IMyTextPanel> OutputPanels { get; set; }
-        private List<IMyTerminalBlock> Refineries { get; set; }
-        private List<IMyTerminalBlock> CargoContainers { get; set; }
+        DrillStation station = null;
 
-
-        private bool movingToPosition = false;
-        private int currentCircle = -1;
-        private bool initflattening = false;
-        private bool endflattening = false;
-        private bool drillingDone = false;
-        private Dictionary<string, string> initArgs;
-
-        void Main(string argument)
+        void Main(string arg)
         {
-            //check if all blocks are initialized
-            if (!(HorizontalPiston != null && VerticalPistons != null && Drills != null && Rotor != null))
+            if (arg.Contains("reseststorage=true"))
             {
-                Init(argument);
+                Storage = "";
             }
 
-            if (movingToPosition)
+            if (station == null)
             {
-                ToCurrentCircleDrillRadiusStartPosition();
-                return;
+                station = new DrillStation(GridTerminalSystem, Storage);
             }
 
-            if (initflattening)
+            station.Request();
+
+            Storage = station.State.GetStateDTO(station).ToString();
+            Echo(string.Format("Storage:\n{0}", Storage));
+        }
+
+        /// <summary>
+        /// The InitState
+        /// </summary>
+        class InitState : State
+        {
+            public StateDTO GetStateDTO(Context context)
             {
-                FlatteningCircles();
-                return;
+                return new StateDTO(typeof(InitState).Name, -1, -1);
             }
 
-            if (!drillingDone)
+            public void Handle(Context context)
             {
-                if (!movingToPosition)
-                    Drill();
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
-                CLeanRefineries();
-            }
-            else
-            {
-                if (endflattening)
+                //turn on the timer block and set the interval, also start the timer
+                drillStationBlocks.Timer.GetActionWithName("OnOff_On").Apply(drillStationBlocks.Timer);
+                drillStationBlocks.Timer.SetValueFloat("TriggerDelay", 1);
+                drillStationBlocks.Timer.GetActionWithName("Start").Apply(drillStationBlocks.Timer);
+
+                //turn on all antenna
+                drillStationBlocks.Antennas.ForEach(block =>
                 {
-                    FlatteningCircles(TARGET_DEPTH);
-                    //then we are done with the endflattening
-                    if (currentCircle < 0)
-                    {
-                        endflattening = false;
-                    }
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
 
-                    return;
+                //turn on all panels
+                drillStationBlocks.DebugPanels.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+
+                //turn on all drills
+                drillStationBlocks.Drills.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on all hPistons
+                drillStationBlocks.HorizontalPiston.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on all refineries
+                drillStationBlocks.Refineries.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //turn on the rotor
+                drillStationBlocks.Rotor.GetActionWithName("OnOff_On").Apply(drillStationBlocks.Rotor);
+
+                //turn on all vPistons
+                drillStationBlocks.VerticalPistons.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                //if the storage contains state info, load it.
+                var storage = (context as DrillStation).PersistantStorage;
+                if (storage.Contains("state="))
+                {
+                    context.State = new StateDTO(storage).BuildState();
                 }
                 else {
-                    currentCircle = -1;
-                    ToCurrentCircleDrillRadiusStartPosition();
-                    if (!movingToPosition)
-                        Shutdown();
-                }
-            }
-        }
-
-        void Shutdown()
-        {
-            //clean the refineries input and output and stop them
-            CLeanRefineries(0);
-            CLeanRefineries(1);
-
-            Refineries.ForEach(refinery => refinery.GetActionWithName("OnOff_Off").Apply(refinery));
-
-            //turn off drills
-            Drills.ForEach(drill => drill.GetActionWithName("OnOff_Off").Apply(drill));
-
-            //stop and turn of rotor
-            setRotorSpeed(0f);
-            Rotor.GetActionWithName("OnOff_Off").Apply(Rotor);
-
-            //turn off pistons
-            HorizontalPiston.GetActionWithName("OnOff_Off").Apply(HorizontalPiston);
-            VerticalPistons.ForEach(piston => piston.GetActionWithName("OnOff_Off").Apply(piston));
-
-            //turn off the debug panels
-            if (OutputPanels != null)
-                OutputPanels.ForEach(panel => panel.GetActionWithName("OnOff_Off").Apply(panel));
-
-            SetStatusToAntenna("DONE", false, false);
-
-            //turn off timers
-            var timers = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<IMyTimerBlock>(timers);
-            timers.ForEach(timer => timer.GetActionWithName("OnOff_Off").Apply(timer));
-
-            //turn off self
-            Me.GetActionWithName("OnOff_Off").Apply(Me);
-        }
-
-        void CLeanRefineries(int refineryTargetInventoryIndex = 1)
-        {
-            //get Refineries
-            if (Refineries == null)
-                Refineries = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<IMyRefinery>(Refineries);
-
-            //get Cargo Containers
-            if (CargoContainers == null)
-                CargoContainers = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(CargoContainers);
-
-            foreach (var refinery in Refineries)
-            {
-                //get the target inventory, 0 is input, 1 is output, else will probably throw error, CBA to check on this
-                var refineryInventory = refinery.GetInventory(refineryTargetInventoryIndex);
-                var refineryItems = refineryInventory.GetItems();
-                IMyInventory targetInventory = null;
-
-                //if there are items in the refinery
-                if (refineryItems.Count > 0)
-                {
-                    //revers loop as we will remove items
-                    for (int i = refineryItems.Count - 1; i >= 0; i--)
+                    //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                     {
-                        //loop the containers to find a target
-                        foreach (var cargoContainer in CargoContainers)
+                        //when done proceed to the next state
+                        if (INIT_FLATTENING)
                         {
-                            //if the container is operational and not full it is a valid target
-                            if ((cargoContainer.IsFunctional || cargoContainer.IsWorking) && !cargoContainer.GetInventory(0).IsFull)
-                            {
-                                targetInventory = cargoContainer.GetInventory(0);
-                                break;
-                            }
+                            context.State = new FlatteningState(VERTICAL_OFFSET);
                         }
-
-                        // transfer items if target is found
-                        if (targetInventory != null)
-                            refineryInventory.TransferItemTo(targetInventory, i);
+                        else
+                        {
+                            context.State = new DeepeningState();
+                        }
                     }
                 }
             }
+
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                //nothing to do here
+                return;
+            }
+
+            public string Status(Context context)
+            {
+                //leave blank
+                return "INIT";
+            }
         }
 
-        void Drill()
+        /// <summary>
+        /// The FlatteningState
+        /// </summary>
+        class FlatteningState : State
         {
-            ClearDebug();
+            private int currentCircle = 0;
+            private float depth;
 
-            //check for init conditions
-            if (currentCircle < 0)
+            /// <summary>
+            /// initializes a new FlatteningState
+            /// </summary>
+            /// <param name="targetDepth"> the depth on wich the flattening needs to happen</param>
+            public FlatteningState(float targetDepth)
             {
-                SetStatusToAntenna("DRILLING-INIT");
-
-                if (DEBUG)
-                    OutputToDebug("Drill sequece, init");
-
-                //move to the start position
-                ToCurrentCircleDrillRadiusStartPosition();
-
-                //if movingToPosition is false, the we are at the starting position, set the current index to 0
-                if (!movingToPosition)
-                {
-                    //ínit is done
-                    currentCircle = 0;
-
-                    //remove rotor limits
-                    SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
-
-                    //Move the horizontal piston to the circle defined
-                    if (DEBUG)
-                        OutputToDebug(string.Format("trying to access DRILL_RADII witj index {0} [1]", currentCircle));
-
-                    MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
-
-                    //start the rotor
-                    setRotorSpeed(ROTOR_RPM);
-
-                    if (DEBUG)
-                        OutputToDebug("Drill sequece init done");
-                }
+                this.depth = targetDepth;
             }
-            else
+
+            public StateDTO GetStateDTO(Context context)
             {
+                return new StateDTO(typeof(FlatteningState).Name, currentCircle, depth);
+            }
+
+            public void Handle(Context context)
+            {
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //if currentCircle < the number of radii the flatten, else move to start, and proceed to next state
                 if (currentCircle < DRILL_RADII.Count)
                 {
-                    SetStatusToAntenna(string.Format("DRILLING {0}/{1}", currentCircle + 1, DRILL_RADII.Count));
-
-                    //if movingToPosition is false, the we are at the starting position, set the current index to 0
-                    if (!movingToPosition)
+                    //move the rotor to -360 degree on even circles, to 0 degree on unevem circles, with ROTOR_RPM
+                    var targetDegree = (currentCircle % 2 == 0) ? -360 : 0;
+                    if ((drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, depth, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, targetDegree, ROTOR_RPM)))
                     {
-                        //start the rotor
-                        RemoveRotorLimits();
-                        setRotorSpeed(ROTOR_RPM);
-
-                        if (DEBUG)
-                            OutputToDebug(string.Format("Drilling circle {0}", currentCircle));
-
-                        //Move the horizontal piston to the circle defined
-                        if (DEBUG)
-                            OutputToDebug(string.Format("trying to access DRILL_RADII witj index {0} [2]", currentCircle));
-
-                        MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
-
-                        //move the vertical positions
-                        if (DEBUG)
-                            OutputToDebug(string.Format("Target depth: {0}\nCurrent depth: {1}", TARGET_DEPTH, GetPistonsTotalPosition(VerticalPistons)));
-
-                        MovePistonToPosition(VerticalPistons, TARGET_DEPTH, DRILL_DOWN_SPEED);
-
-                        if (TARGET_DEPTH <= GetPistonsTotalPosition(VerticalPistons))
+                        //when it is not there
+                        currentCircle++;
+                    }
+                }
+                else
+                {
+                    //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
+                    {
+                        if (depth != TARGET_DEPTH)
                         {
-                            if (DEBUG)
-                                OutputToDebug("All pistons reached max depth, returning to start position");
-
-                            Echo(string.Format("Done drilling circle {0}/{1}, do currentCurcle++ and performing ToStart()", currentCircle + 1, DRILL_RADII.Count));
-
-                            currentCircle++;
-
-                            if (currentCircle < DRILL_RADII.Count)
-                            {
-                                ToCurrentCircleDrillRadiusStartPosition();
-                            }
+                            context.State = new DeepeningState();
                         }
+                        else
+                        {
+                            context.State = new DoneState();
+                        }
+                    }
+                }
+            }
+
+            public string Status(Context context)
+            {
+                if (currentCircle == DRILL_RADII.Count)
+                {
+                    return "Flattening DONE";
+                }
+                else
+                {
+                    return string.Format("Flattening [{0}/{1}] ({2:0.##}m)", currentCircle + 1, DRILL_RADII.Count, BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
+                }
+            }
+
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                this.currentCircle = stateDTO.Circle;
+                this.depth = stateDTO.Depth;
+            }
+        }
+
+        /// <summary>
+        /// The DrillingState
+        /// </summary>
+        class DeepeningState : State
+        {
+            private int currentCircle = 0;
+            private bool depthReached = true;
+            private float verticalOffset = VERTICAL_OFFSET;
+
+            public StateDTO GetStateDTO(Context context)
+            {
+                return new StateDTO(typeof(DeepeningState).Name, currentCircle, depthReached ? verticalOffset : BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
+            }
+
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                currentCircle = stateDTO.Circle;
+
+                //we need to know how much the drills drop per round to build in safety margin
+                var safetyMargin = 60 * DRILL_DOWN_SPEED / ROTOR_RPM;
+
+                verticalOffset = stateDTO.Depth - safetyMargin;
+            }
+
+            public void Handle(Context context)
+            {
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //if currentCircle < the number of radii the flatten, else move to start, and proceed to next state
+                if (currentCircle < DRILL_RADII.Count)
+                {
+                    if (depthReached)
+                    {
+                        //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                        if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, verticalOffset, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, 0, 1))
+                        {
+                            depthReached = false;
+                        }
+                        else
+                        {
+                            //if not at start, break excution
+                            return;
+                        }
+                    }
+
+                    //unlock rotor
+                    BlockUtils.RemoveRotorLimits(drillStationBlocks.Rotor);
+
+                    //set rotor speed
+                    BlockUtils.setRotorSpeed(drillStationBlocks.Rotor, ROTOR_RPM);
+
+                    //move the vPistons down until the depth is reached
+                    if (BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, TARGET_DEPTH, DRILL_DOWN_SPEED))
+                    {
+                        currentCircle++;
+                        verticalOffset = VERTICAL_OFFSET;
+                        depthReached = true;
+                    }
+                }
+                else {
+                    //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
+                    {
+                        //when done proceed to the next state
+                        if (END_FLATTENING)
+                        {
+                            context.State = new FlatteningState(TARGET_DEPTH);
+                        }
+                        else
+                        {
+                            context.State = new DoneState();
+                        }
+                    }
+                }
+            }
+
+            public string Status(Context context)
+            {
+                if (currentCircle == DRILL_RADII.Count)
+                {
+                    return "Drilling DONE";
+                }
+                else
+                {
+                    return string.Format("Drilling [{0}/{1}] ({2:0.##}m/{3:0.##}m)", currentCircle + 1, DRILL_RADII.Count, depthReached ? verticalOffset : BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons), TARGET_DEPTH);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The DoneState
+        /// </summary>
+        class DoneState : State
+        {
+            public StateDTO GetStateDTO(Context context)
+            {
+                return new StateDTO(typeof(DoneState).Name, -1, -1);
+            }
+
+            public void Handle(Context context)
+            {
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                if (!drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
+                    return;
+
+                //turn off all panels
+                drillStationBlocks.DebugPanels.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_Off").Apply(block);
+                });
+
+                //turn off all drills
+                drillStationBlocks.Drills.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_Off").Apply(block);
+                });
+
+                //turn off all hPistons
+                drillStationBlocks.HorizontalPiston.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_Off").Apply(block);
+                });
+
+                //turn off the rotor
+                drillStationBlocks.Rotor.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.Rotor);
+
+                //turn off all vPistons
+                drillStationBlocks.VerticalPistons.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_Off").Apply(block);
+                });
+
+                //if the refineries do not have anything left to refine, turn them off
+                var allRefineriesDone = true;
+                drillStationBlocks.Refineries.ForEach(refinery =>
+                {
+                    var refineryItems = refinery.GetInventory(0).GetItems();
+                    //if there are items in the refinery
+                    if (refineryItems.Count > 0)
+                    {
+                        var stop = true;
+                        refineryItems.ForEach(item =>
+                        {
+                            stop &= item.Amount <= (VRage.MyFixedPoint)0.1f;
+                            allRefineriesDone &= stop;
+                        });
+
+                        if (stop)
+                            refinery.GetActionWithName("OnOff_Off").Apply(refinery);
                     }
                     else
                     {
-                        ToCurrentCircleDrillRadiusStartPosition();
+                        refinery.GetActionWithName("OnOff_Off").Apply(refinery);
                     }
-                }
-                else
+                });
+
+                //if all refineries are done: clean the remaining input and output, stop timer and shutdown script
+                if (allRefineriesDone)
                 {
-                    OutputToDebug("Drill sequece, closure");
-                    SetStatusToAntenna(string.Format("DRILLING-END"));
+                    drillStationBlocks.CleanRefineries(0);
+                    drillStationBlocks.CleanRefineries(1);
 
-                    //move to the start position
-                    movingToPosition = ToPosition(0, 0, 0);
+                    //timer
+                    drillStationBlocks.Timer.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.Timer);
 
-                    //if to start is false, the we are at the starting position, turn off all unneeded devices to concerve energy
-                    if (!movingToPosition)
+                    //scriot
+                    drillStationBlocks.ProgrammableBlock.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.ProgrammableBlock);
+                }
+            }
+
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                return;
+            }
+
+            public string Status(Context context)
+            {
+                return "DONE";
+            }
+        }
+
+        /// <summary>
+        /// The 'State' interface
+        /// </summary>
+        interface State
+        {
+            /// <summary>
+            /// handle the context in order to move to the next state.
+            /// </summary>
+            /// <param name="context"></param>
+            void Handle(Context context);
+
+            /// <summary>
+            /// retrieves a friendly status message
+            /// </summary>
+            /// <param name="context"></param>
+            string Status(Context context);
+
+            /// <summary>
+            /// gets the stateDTO based on the current variables
+            /// </summary>
+            /// <param name="context"></param>
+            StateDTO GetStateDTO(Context context);
+
+            /// <summary>
+            /// sets the state to a point contained in the DTO
+            /// </summary>
+            /// <param name="stateDTO"></param>
+            void LoadFromStateDTO(StateDTO stateDTO);
+        }
+
+        class StateDTO
+        {
+            public string State { get; private set; }
+            public int Circle { get; private set; }
+            public float Depth { get; private set; }
+
+            public StateDTO(string state, int circle, float depth)
+            {
+                State = state;
+                Circle = circle;
+                Depth = depth;
+            }
+
+            /// <summary>
+            /// builds the DTO info from a string value
+            /// </summary>
+            /// <param name="persistantStorage"></param>
+            public StateDTO(string persistantStorage)
+            {
+                var keyValues = persistantStorage.Split(new string[] { "\n" }, StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var keyValue in keyValues)
+                {
+                    var key = keyValue.Split('=')[0];
+                    var value = keyValue.Split('=')[1];
+
+                    switch (key)
                     {
-                        Echo(string.Format("Done drilling, move to start of current circle -1"));
-                        SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
-                        OutputToDebug("Drill sequece done");
-
-                        currentCircle = -1;
-
-                        //TODO: turn off everything non-vital
-                        drillingDone = true;
+                        case "state":
+                            State = value;
+                            break;
+                        case "circle":
+                            Circle = int.Parse(value);
+                            break;
+                        case "depth":
+                            Depth = float.Parse(value);
+                            break;
                     }
                 }
             }
-        }
 
-        void FlatteningCircles(float depth = 0f)
-        {
-            //clear the output screen
-            ClearDebug();
-
-            if (DEBUG)
+            /// <summary>
+            /// formats the DTO to display as a string, also used in persistant storage
+            /// </summary>
+            /// <returns></returns>
+            public override string ToString()
             {
-                OutputToDebug(string.Format("Drilling the flattening rounds on depth {0}", depth));
-                OutputToDebug(string.Format("Current circle: {0}", currentCircle));
+                return string.Format("state={0}\ncircle={1}\ndepth={2}", State, Circle, Depth);
             }
 
-            SetStatusToAntenna(string.Format("FLATTENING [{0}/{1}]", currentCircle + 1, DRILL_RADII.Count), false);
-
-            var currentRotorposition = GetRotorPosition();
-
-            //turn the rotor to zero to if the current circle is -1
-            if (currentCircle < 0 || depth != GetPistonsTotalPosition(VerticalPistons))
+            /// <summary>
+            /// returns a build state from the DTO
+            /// </summary>
+            /// <returns></returns>
+            public State BuildState()
             {
-                if (DEBUG)
-                    OutputToDebug("init flattening rounds, moving rotor to start");
+                State targetState;
 
-                //debug outs happen in the method
-                MoveRotorToPosition(-180f);
-
-                MovePistonToPosition(VerticalPistons, depth);
-            }
-
-            currentRotorposition = GetRotorPosition();
-
-            if (DEBUG)
-                OutputToDebug(string.Format("Current rotor position: {0}", currentRotorposition));
-
-            /*start a new circle
-            *
-            * if the rotor position is 0 start a new circle by
-            * 1) incrementing the current circle (first pass will invrement from -1 to 0)
-            * 2) moving the hPiston to the respective position
-            * 3) reversing the rotor so the the radius gets drilled the first time
-            *
-            * We need to check to prevent en index out of bounds. if that would happen, then we end the safety rounds.
-            */
-            if (currentRotorposition <= -180 && depth == GetPistonsTotalPosition(VerticalPistons))
-            {
-                currentCircle++;
-
-                if (DEBUG)
-                    OutputToDebug(string.Format("Current circle: {0}", currentCircle));
-
-                //full circle, cannot use 360 or as SE will interpret it as +infinity
-                // idem for negativ values
-                SetRotorLimits(-180, 180);
-
-                //if current circle > circles defined go to back to start and safty circles are done
-                if (currentCircle >= DRILL_RADII.Count)
+                switch (State)
                 {
-                    //set the safety rounds to false as we are done and never will have to do it again
-                    initflattening = false;
-
-                    //set the current position back to -1 (init state of each step)
-                    currentCircle = -1;
-
-                    //stop the rotor
-                    setRotorSpeed(0f);
-
-                    //Move the horizontal piston to the start circle
-                    MovePistonToPosition(HorizontalPiston, DRILL_RADII[0]);
-
-                    if (DEBUG)
-                        OutputToDebug("Ended flattening Circles");
-
-                    return;
+                    case "FlatteningState":
+                        targetState = new FlatteningState(0);
+                        break;
+                    case "DeepeningState":
+                        targetState = new DeepeningState();
+                        break;
+                    case "DoneState":
+                        targetState = new DoneState();
+                        break;
+                    default:
+                        targetState = new InitState();
+                        break;
                 }
 
-                //Move the horizontal piston to the circle defined
-                if (DEBUG)
-                    OutputToDebug(string.Format("trying to access DRILL_RADII witj index {0} [3]", currentCircle));
+                targetState.LoadFromStateDTO(this);
 
-                MovePistonToPosition(HorizontalPiston, DRILL_RADII[currentCircle]);
-
-                setRotorSpeed(ROTOR_RPM);
-            }
-
-            //reverse the drills so the radius gets drilled the second time
-            if (currentRotorposition >= 180 && depth == GetPistonsTotalPosition(VerticalPistons))
-            {
-                setRotorSpeed(-ROTOR_RPM);
-            }
-
-            if (DEBUG)
-                OutputToDebug(string.Format("currentCircle: {0}", currentCircle));
-        }
-
-        bool ToPosition(float width, float depth, float rotation)
-        {
-            var working = false;
-
-            ClearDebug();
-
-            if (DEBUG)
-            {
-                OutputToDebug(string.Format("moving to position width: {0}, depth: {1}, rotation: {2}", width, depth, rotation));
-                OutputToDebug("stopping rotor and turning on drills");
-            }
-
-            setRotorSpeed(0f);
-
-            var moveVertical = GetPistonsTotalPosition(VerticalPistons) != depth;
-            var moveHorizontal = HorizontalPiston.CurrentPosition != width;
-            var moveCircle = GetRotorPosition() != rotation;
-
-            if (DEBUG)
-            {
-                OutputToDebug(string.Format("need to move vertical Positons: {0}", moveVertical));
-                OutputToDebug(string.Format("need to move horizontal Positons: {0}", moveHorizontal));
-                OutputToDebug(string.Format("need to move rotor: {0}", moveCircle));
-            }
-
-            setRotorSpeed(0f);
-
-            working = moveVertical || moveHorizontal || moveCircle;
-
-            //If the drills are not on, turn on
-            Drills.ForEach(drill => drill.GetActionWithName("OnOff_On").Apply(drill));
-
-            //While the vPistons are not in position, move
-            if (moveVertical)
-            {
-                MovePistonToPosition(VerticalPistons, depth);
-                return true;
-            }
-
-            //When the hPistons are not in position, move
-            if (moveHorizontal)
-            {
-                MovePistonToPosition(HorizontalPiston, width);
-                return true;
-            }
-
-            //move rotor to position
-            if (moveCircle)
-            {
-                MoveRotorToPosition(rotation);
-                return true;
-            }
-
-            if (DEBUG)
-                OutputToDebug("reached end of ToPosition, no more moving to be done");
-
-            return working;
-        }
-
-        void ToCurrentCircleDrillRadiusStartPosition()
-        {
-            var working = false;
-
-            if (currentCircle > -1)
-            {
-                working = ToPosition(DRILL_RADII[currentCircle], 0, 0);
-            }
-            else
-            {
-                working = ToPosition(0, 0, 0);
-            }
-
-            movingToPosition = working;
-        }
-
-        void Init(string argument)
-        {
-            if (DEBUG)
-            {
-                ClearDebug();
-                OutputToDebug("INIT: clearing text");
-            }
-
-            SetStatusToAntenna("INIT-Start", false, false);
-
-            string outval = "";
-            bool found = false;
-            initArgs = new Dictionary<string, string>();
-
-            if (DEBUG)
-                OutputToDebug("parsing input args");
-
-            foreach (var keyPair in argument.Split(new string[] { "|" }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                string[] split = keyPair.Split('=');
-                initArgs.Add(split[0], split[1]);
-            }
-
-            //set done to false, DUUUHH
-            drillingDone = false;
-            //move drills to start after init
-            movingToPosition = true;
-
-            //ground level flattening
-            found = initArgs.TryGetValue("initflattening", out outval);
-
-            if (found)
-            {
-                initflattening = bool.Parse(outval);
-                if (DEBUG)
-                    OutputToDebug(string.Format("input arg groundlevelflattening found: {0}", initflattening));
-            }
-            else
-            {
-                initflattening = INIT_FLATTENING;
-            }
-
-            //bottom flattening
-            found = initArgs.TryGetValue("endflattening", out outval);
-
-            if (found)
-            {
-                endflattening = bool.Parse(outval);
-                if (DEBUG)
-                    OutputToDebug(string.Format("input arg skipsafetycircles found: {0}", endflattening));
-            }
-            else
-            {
-                endflattening = END_FLATTENING;
-            }
-
-            //reset the current circle index to init state
-            found = initArgs.TryGetValue("currentcircle", out outval);
-            if (found)
-            {
-                currentCircle = int.Parse(outval);
-                if (DEBUG)
-                    OutputToDebug(string.Format("input arg currentcircle found: {0}", currentCircle));
-            }
-            else
-            {
-                currentCircle = -1;
-            }
-
-            if (DEBUG)
-                OutputToDebug("Initializing blocks");
-
-            HorizontalPiston = GridTerminalSystem.GetBlockWithName(H_PISTON_NAME) as IMyPistonBase;
-            Rotor = GridTerminalSystem.GetBlockWithName(ROTOR_NAME) as IMyMotorAdvancedStator;
-
-            if (DEBUG)
-            {
-                OutputToDebug("found the folowing:");
-                OutputToDebug(string.Format("horizontal piston: {0}\nRotor: {1}", HorizontalPiston != null, Rotor != null));
-            }
-
-            if (FORCEROTOR_TORQUE)
-                ForceRotorsTorque();
-
-            if (DEBUG)
-            {
-                OutputToDebug("Current Rotor limits");
-                OutputToDebug(string.Format("Lower: {0}, Upper: {1}", Rotor.LowerLimit, Rotor.UpperLimit));
-            }
-
-            VerticalPistons = new List<IMyPistonBase>();
-            Drills = new List<IMyShipDrill>();
-
-            var pistonTempList = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<IMyPistonBase>(pistonTempList);
-
-            pistonTempList.ForEach(vPiston => { if (vPiston.CustomName.Contains(V_PISTON_NAME)) { VerticalPistons.Add(vPiston as IMyPistonBase); } });
-
-            var drillTempList = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<IMyShipDrill>(drillTempList);
-
-            drillTempList.ForEach(drill => Drills.Add(drill as IMyShipDrill));
-
-            if (DEBUG)
-                OutputToDebug(string.Format("#vertical pistons: {0}\n#drils: {1}", VerticalPistons.Count, Drills.Count));
-
-            SetStatusToAntenna("INIT-Done", false, false);
-        }
-
-        void OutputToDebug(string text)
-        {
-            if (OutputPanels == null || OutputPanels.Count == 0)
-            {
-                OutputPanels = new List<IMyTextPanel>();
-                var panelTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(panelTempList);
-
-                panelTempList.ForEach(panel => { if (panel.CustomName.Contains(DEBUG_PANEL_NAME)) { (panel as IMyTextPanel).WritePublicTitle("DEBUG"); OutputPanels.Add(panel as IMyTextPanel); } });
-            }
-
-            if (OutputPanels != null)
-            {
-                if (!text.EndsWith("\n"))
-                    text += "\n";
-
-                OutputPanels.ForEach(panel => panel.WritePublicText(panel.GetPublicText() + text));
+                return targetState;
             }
         }
 
-        void ClearDebug()
+        abstract class Context
         {
-            if (OutputPanels == null || OutputPanels.Count == 0)
-            {
-                OutputPanels = new List<IMyTextPanel>();
-                var panelTempList = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(panelTempList);
+            private State _state;
 
-                panelTempList.ForEach(panel => { if (panel.CustomName.Contains(DEBUG_PANEL_NAME)) { OutputPanels.Add(panel as IMyTextPanel); } });
+            // Gets or sets the state
+            public State State
+            {
+                get { return _state; }
+                set { _state = value; }
             }
 
-            OutputPanels.ForEach(panel => { panel.WritePublicText(""); panel.WritePublicTitle("DEBUG"); });
+            /// <summary>
+            /// 
+            /// </summary>
+            public virtual void Request()
+            {
+                _state.Handle(this);
+            }
         }
 
-        void SetStatusToAntenna(string status, bool showPercentage = true, bool showEta = true)
+        /// <summary>
+        /// The 'Context' class
+        /// </summary>
+        class DrillStation : Context
         {
-            if (Antennas == null || Antennas.Count == 0)
+            private DrillStationBlocks _drillStationBlocks;
+            public string _storage;
+
+            // Constructor
+            public DrillStation(IMyGridTerminalSystem GridTerminalSystem, string storage)
             {
+                //init is the default state
+                State = new InitState();
+
+                //store the storage
+                this._storage = storage;
+
+                //build the station blocks
+                this._drillStationBlocks = new DrillStationBlocks(GridTerminalSystem);
+            }
+
+            public string PersistantStorage
+            {
+                get
+                {
+                    return _storage;
+                }
+            }
+
+            // Gets the DrillStationBlocks
+            public DrillStationBlocks DrillStationBlocks
+            {
+                get { return _drillStationBlocks; }
+            }
+
+            public override void Request()
+            {
+                base.Request();
+
+                //move the refined goods to the cargo container
+                DrillStationBlocks.CleanRefineries(1);
+
+                BlockUtils.SetStatusToAntennas(DrillStationBlocks.Antennas, State.Status(this));
+            }
+        }
+
+        class DrillStationBlocks
+        {
+            public IMyMotorAdvancedStator Rotor { get; set; }
+            public List<IMyPistonBase> HorizontalPiston { get; set; }
+            public List<IMyPistonBase> VerticalPistons { get; set; }
+            public List<IMyShipDrill> Drills { get; set; }
+            public List<IMyRadioAntenna> Antennas { get; set; }
+            public List<IMyTextPanel> DebugPanels { get; set; }
+            public List<IMyRefinery> Refineries { get; set; }
+            public List<IMyCargoContainer> CargoContainers { get; set; }
+            public IMyTimerBlock Timer { get; set; }
+            public IMyProgrammableBlock ProgrammableBlock { get; set; }
+
+            public DrillStationBlocks(IMyGridTerminalSystem GridTerminalSystem)
+            {
+                Rotor = GridTerminalSystem.GetBlockWithName(ROTOR_NAME) as IMyMotorAdvancedStator;
+                Timer = GridTerminalSystem.GetBlockWithName(TIMER_NAME) as IMyTimerBlock;
+                ProgrammableBlock = GridTerminalSystem.GetBlockWithName(PROGRAMMABLEBLOCK_NAME) as IMyProgrammableBlock;
+
+                //HorizontalPiston 
+                HorizontalPiston = new List<IMyPistonBase>();
+                var hPistonTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyPistonBase>(hPistonTempList);
+                hPistonTempList.ForEach(vPiston =>
+                {
+                    if (vPiston.CustomName.Contains(H_PISTON_NAME))
+                    {
+                        HorizontalPiston.Add(vPiston as IMyPistonBase);
+                    }
+                });
+
+                //VerticalPistons 
+                VerticalPistons = new List<IMyPistonBase>();
+                var vPistonTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyPistonBase>(vPistonTempList);
+                vPistonTempList.ForEach(vPiston =>
+                {
+                    if (vPiston.CustomName.Contains(V_PISTON_NAME))
+                    {
+                        VerticalPistons.Add(vPiston as IMyPistonBase);
+                    }
+                });
+
+                //Drills
+                Drills = new List<IMyShipDrill>();
+                var drillTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyShipDrill>(drillTempList);
+                drillTempList.ForEach(drill => Drills.Add(drill as IMyShipDrill));
+
+                //Antennas
                 Antennas = new List<IMyRadioAntenna>();
                 var antennaTempList = new List<IMyTerminalBlock>();
                 GridTerminalSystem.GetBlocksOfType<IMyRadioAntenna>(antennaTempList);
-
                 antennaTempList.ForEach(antenna => Antennas.Add(antenna as IMyRadioAntenna));
+
+                //DebugPanels
+                DebugPanels = new List<IMyTextPanel>();
+                var debugPanelTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(debugPanelTempList);
+                debugPanelTempList.ForEach(debugPanel => DebugPanels.Add(debugPanel as IMyTextPanel));
+
+                //Refineries
+                Refineries = new List<IMyRefinery>();
+                var refineryTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyRefinery>(refineryTempList);
+                refineryTempList.ForEach(refinery => Refineries.Add(refinery as IMyRefinery));
+
+                //CargoContainers
+                CargoContainers = new List<IMyCargoContainer>();
+                var containerTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(containerTempList);
+                containerTempList.ForEach(container => CargoContainers.Add(container as IMyCargoContainer));
             }
 
-            string antennaName = "{0} - {1}";
-            if (showPercentage)
-                antennaName += " ({2:0.##}%)";
-            if (showEta)
-                antennaName += " [{3}]";
-
-            if (Antennas != null)
+            public bool ToPosition(List<IMyPistonBase> pistons1, float pistons1position, float speed1, List<IMyPistonBase> pistons2, float pistons2position, float speed2, IMyMotorAdvancedStator rotor, float rotorPosition, float rpm)
             {
-                Antennas.ForEach(antenna => antenna.SetCustomName(string.Format(antennaName, DRILL_STATION_NAME, status, GetPercentageDone(), GetETA())));
-            }
-        }
-
-        float GetPistonsTotalPosition(List<IMyPistonBase> pistons)
-        {
-
-            if (DEBUG)
-                OutputToDebug("Calculating total position of pistons");
-
-            var total = 0f;
-
-            pistons.ForEach(piston => total += piston.CurrentPosition);
-
-            if (DEBUG)
-                OutputToDebug(string.Format("Done Calculating total position of pistons: {0}", total));
-
-            return total;
-        }
-
-        float GetRotorPosition()
-        {
-            var currentposition = "";
-
-            System.Text.RegularExpressions.Regex matchthis = new System.Text.RegularExpressions.Regex(@"^.+\n.+\:\s?(-?[0-9]+).*[\s\S]*$");
-            System.Text.RegularExpressions.Match match = matchthis.Match(Rotor.DetailedInfo);
-            if (match.Success)
-            {
-                currentposition = match.Groups[1].Value;
-            }
-            else
-            {
-                OutputToDebug("ERROR: The main rotor position could not parsed");
-                OutputToDebug("ERROR: script stopped");
-                throw new FormatException("The rotor position could not parsed");
-            }
-            return float.Parse(currentposition);
-        }
-
-        void ForceRotorsTorque()
-        {
-            if (DEBUG)
-                OutputToDebug("Forcing rotor torque");
-
-            Rotor.SetValueFloat("BrakingTorque", 36000000);
-            Rotor.SetValueFloat("Torque", 10000000);
-        }
-
-        void MoveRotorToPosition(float destinationPosition, float rpm = ROTOR_RPM)
-        {
-            var currentPosition = GetRotorPosition();
-
-            if (DEBUG)
-            {
-                OutputToDebug("Rotor Current rotor position: " + currentPosition);
-                OutputToDebug("Rotor Destination rotor position: " + destinationPosition);
-                OutputToDebug("Rotor current LowerLimit: " + Rotor.GetValueFloat("LowerLimit"));
-                OutputToDebug("Rotor current UpperLimit: " + Rotor.GetValueFloat("UpperLimit"));
-            }
-
-            //set the limits
-            Rotor.SetValueFloat("LowerLimit", destinationPosition);
-            Rotor.SetValueFloat("UpperLimit", destinationPosition);
-
-            //move the rotor to within the limits
-            if (currentPosition == destinationPosition)
-            {
-                setRotorSpeed(0f);
-                Rotor.GetActionWithName("OnOff_Off").Apply(Rotor); // Stop rotor
-                if (DEBUG)
-                    OutputToDebug("position reached, turning off");
-            }
-            else if (currentPosition < destinationPosition)
-            {
-                Rotor.GetActionWithName("OnOff_On").Apply(Rotor); // Start rotor
-                OutputToDebug("Rotor - currentPosition < destinationPosition");
-                setRotorSpeed(rpm);
-            }
-            else if (currentPosition > destinationPosition)
-            {
-                Rotor.GetActionWithName("OnOff_On").Apply(Rotor); // Start rotor 
-                OutputToDebug("Rotor - currentPosition > destinationPosition");
-                setRotorSpeed(-rpm);
-            }
-        }
-
-        void SetRotorLimits(float lower, float upper)
-        {
-            if (DEBUG)
-            {
-                OutputToDebug("Setting Rotor limits");
-                OutputToDebug(string.Format("Rotor current limit: [{0},{1}]", Rotor.GetValueFloat("LowerLimit"), Rotor.GetValueFloat("UpperLimit")));
-                OutputToDebug(string.Format("setting to [{0},{1}]", lower, upper));
-            }
-
-            //warn for fuckery if settin values possible out of bounds when not obviously meant to be that way
-            if ((lower < -360 && lower != float.NegativeInfinity) || (upper > 360 && upper != float.PositiveInfinity))
-            {
-                Echo("[WARN] Setting Rotor limits is doing wierd stuff around or beyond the 360 degree mark, often SE interprets this as infinity");
-                OutputToDebug("[WARN] Setting Rotor limits is doing wierd stuff around or beyond the 360 degree mark, often SE interprets this as infinity");
-            }
-
-            Rotor.SetValueFloat("LowerLimit", lower);
-            Rotor.SetValueFloat("UpperLimit", upper);
-        }
-
-        void setRotorSpeed(float rpm)
-        {
-            if (DEBUG)
-                OutputToDebug(string.Format("Setting Rotor speed to: {0}", rpm));
-
-            Rotor.SetValueFloat("Velocity", rpm);
-            Rotor.GetActionWithName("OnOff_On").Apply(Rotor); // Start rotor
-        }
-
-        void RemoveRotorLimits()
-        {
-            if (DEBUG)
-                OutputToDebug("Resetting Rotor limits");
-
-            SetRotorLimits(float.NegativeInfinity, float.PositiveInfinity);
-        }
-
-        void MovePistonToPosition(List<IMyPistonBase> pistons, float destPosition, float speed = 0.5f)
-        {
-            if (DEBUG)
-            {
-                OutputToDebug(string.Format("Moving #{0} pistons to combined position: {1}", pistons.Count, destPosition));
-                var combinedPosition = 0f;
-                pistons.ForEach(piston => combinedPosition += piston.CurrentPosition);
-
-                OutputToDebug(string.Format("Current combined position: {0}", combinedPosition));
-            }
-
-            pistons.ForEach(piston => MovePistonToPosition(piston, destPosition / (float)pistons.Count, speed / (float)pistons.Count));
-        }
-
-        void MovePistonToPosition(IMyPistonBase piston, float destPosition, float speed = 0.5f)
-        {
-            if (DEBUG)
-            {
-                OutputToDebug(string.Format("Moving single piston to: {0}", destPosition));
-                OutputToDebug(string.Format("Current position: {0}", piston.CurrentPosition));
-            }
-
-            piston.SetValueFloat("LowerLimit", destPosition);
-            piston.SetValueFloat("UpperLimit", destPosition);
-
-            if (piston.CurrentPosition > destPosition)
-            {
-                piston.SetValueFloat("Velocity", -speed);
-            }
-            else
-            {
-                piston.SetValueFloat("Velocity", speed);
-            }
-        }
-
-        string GetETA()
-        {
-            try
-            {
-                var seconds = 0f;
-
-                if (initflattening)
+                if (!BlockUtils.MovePistonsToPosition(pistons1, pistons1position, speed1))
                 {
-                    seconds = ((DRILL_RADII.Count - currentCircle) * 2) / (ROTOR_RPM / 60) + (TARGET_DEPTH / DRILL_DOWN_SPEED) * DRILL_RADII.Count;
+                    return false;
+                }
+
+                if (!BlockUtils.MovePistonsToPosition(pistons2, pistons2position, speed2))
+                {
+                    return false;
+                }
+
+                if (!BlockUtils.MoveRotorToPosition(rotor, rotorPosition, rpm))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            public void CleanRefineries(int refineryInventoryIndex)
+            {
+                foreach (var refinery in Refineries)
+                {
+                    //get the target inventory, 0 is input, 1 is output, else will probably throw error, CBA to check on this
+                    var refineryInventory = refinery.GetInventory(refineryInventoryIndex);
+                    var refineryItems = refineryInventory.GetItems();
+                    IMyInventory targetInventory = null;
+
+                    //if there are items in the refinery
+                    if (refineryItems.Count > 0)
+                    {
+                        //revers loop as we will remove items
+                        for (int i = refineryItems.Count - 1; i >= 0; i--)
+                        {
+                            //loop the containers to find a target
+                            foreach (var cargoContainer in CargoContainers)
+                            {
+                                //if the container is operational and not full it is a valid target
+                                if ((cargoContainer.IsFunctional || cargoContainer.IsWorking) && !cargoContainer.GetInventory(0).IsFull)
+                                {
+                                    targetInventory = cargoContainer.GetInventory(0);
+                                    break;
+                                }
+                            }
+
+                            // transfer items if target is found
+                            if (targetInventory != null)
+                                refineryInventory.TransferItemTo(targetInventory, i);
+                        }
+                    }
+                }
+            }
+        }
+
+        class BlockUtils
+        {
+            /// <summary>
+            /// Sets the state to all antena connected on the GridTerminalSystem
+            /// </summary>
+            /// <param name="antennaLists">List of IMyRadioAntenna</param>
+            /// <param name="status">Current status</param>
+            public static void SetStatusToAntennas(List<IMyRadioAntenna> antennaLists, string status)
+            {
+                if (antennaLists == null)
+                    return;
+
+                string antennaName = "{0} - {1}";
+                antennaLists.ForEach(antenna => antenna.SetCustomName(string.Format(antennaName, DRILL_STATION_NAME, status)));
+            }
+
+            /// <summary>
+            /// gets the total amount of psiton extention
+            /// </summary>
+            /// <param name="pistons">List of IMyPistonBase</param>
+            /// <returns>the total extention in meter</returns>
+            public static float GetPistonsTotalPosition(List<IMyPistonBase> pistons)
+            {
+                var total = 0f;
+
+                pistons.ForEach(piston => total += piston.CurrentPosition);
+
+                return total;
+            }
+
+            /// <summary>
+            /// Evaluates the rotors currect position
+            /// </summary>
+            /// <param name="rotor">The rotor to get the position from.</param>
+            /// <returns>the rotor degree position</returns>
+            public static float GetRotorPosition(IMyMotorAdvancedStator rotor)
+            {
+                var currentposition = "";
+
+                System.Text.RegularExpressions.Regex matchthis = new System.Text.RegularExpressions.Regex(@"^.+\n.+\:\s?(-?[0-9]+).*[\s\S]*$");
+                System.Text.RegularExpressions.Match match = matchthis.Match(rotor.DetailedInfo);
+                if (match.Success)
+                {
+                    currentposition = match.Groups[1].Value;
                 }
                 else
                 {
-                    seconds = (TARGET_DEPTH / DRILL_DOWN_SPEED) * (DRILL_RADII.Count - currentCircle);
+                    //Echo("The rotor position could not parsed");
+                    throw new FormatException("The rotor position could not parsed");
                 }
-
-                return string.Format("~ {0}m", Math.Round(seconds / 60, 2, MidpointRounding.AwayFromZero));
+                return float.Parse(currentposition);
             }
-            catch (Exception)
-            {
-                if (DEBUG)
-                    OutputToDebug("Calculating ETA ended with error, returning 'UNKNOWN'");
 
-                return "UNKNOWN";
+            /// <summary>
+            /// forces the torque of the rotor to what i would call safe automatic operational levels
+            /// </summary>
+            public static void ForceRotorsTorque(IMyMotorAdvancedStator rotor)
+            {
+                rotor.SetValueFloat("BrakingTorque", 36000000);
+                rotor.SetValueFloat("Torque", 10000000);
             }
-        }
-        float GetPercentageDone()
-        {
-            if (VerticalPistons != null)
-            {
-                var percentageDone = 0f;
 
-                if (initflattening)
+            /// <summary>
+            /// Moves the rotor to a certain position
+            /// </summary>
+            /// <param name="destinationPosition">the degree value of the postion</param>
+            /// <param name="rpm">the rotor speed to move with</param>
+            /// <returns>returns true wen the rotor is in postion, false if it needs to move.</returns>
+            public static bool MoveRotorToPosition(IMyMotorAdvancedStator rotor, float destinationPosition, float rpm)
+            {
+                var currentPosition = GetRotorPosition(rotor);
+
+                //set the limits
+                SetRotorLimits(rotor, destinationPosition, destinationPosition);
+
+                //move the rotor to within the limits
+                if (currentPosition == destinationPosition)
                 {
-                    percentageDone = 0;
+                    setRotorSpeed(rotor, 0f);
+                    rotor.GetActionWithName("OnOff_Off").Apply(rotor); // Stop rotor
+                    return true;
                 }
-                else
+                else if (currentPosition < destinationPosition)
                 {
-                    percentageDone = (float)currentCircle / DRILL_RADII.Count;
-                    percentageDone += GetPistonsTotalPosition(VerticalPistons) / (TARGET_DEPTH * DRILL_RADII.Count);
-                    percentageDone *= 100;
+                    rotor.GetActionWithName("OnOff_On").Apply(rotor); // Start rotor
+                    setRotorSpeed(rotor, rpm);
+                    return false;
+                }
+                else if (currentPosition > destinationPosition)
+                {
+                    rotor.GetActionWithName("OnOff_On").Apply(rotor); // Start rotor
+                    setRotorSpeed(rotor, -rpm);
+                    return false;
                 }
 
-                return percentageDone;
+                return false;
             }
-            else
+
+            /// <summary>
+            /// Sets the rotor limits
+            /// </summary>
+            /// <param name="rotor">the rotor to set the limits on</param>
+            /// <param name="lower">the lower bound</param>
+            /// <param name="upper">the upper bound</param>
+            public static void SetRotorLimits(IMyMotorAdvancedStator rotor, float lower, float upper)
             {
-                if (DEBUG)
-                    OutputToDebug("Calculating Percentage could not be done, returning 0");
+                //warn for fuckery if settin values possible out of bounds when not obviously meant to be that way
+                if ((lower < -360 && lower != float.NegativeInfinity) || (upper > 360 && upper != float.PositiveInfinity))
+                {
+                    //Echo("[WARN] Setting Rotor limits is doing wierd stuff around or beyond the 360 degree mark, often SE interprets this as infinity");
+                }
 
-                return 0;
+                rotor.SetValueFloat("LowerLimit", lower);
+                rotor.SetValueFloat("UpperLimit", upper);
             }
 
+            /// <summary>
+            /// Sets the rotor speeds
+            /// </summary>
+            /// <param name="rotor">the rotor to set the limits on</param>
+            /// <param name="rpm">the rotor speed in rpm</param>
+            public static void setRotorSpeed(IMyMotorAdvancedStator rotor, float rpm)
+            {
+                rotor.SetValueFloat("Velocity", rpm);
+                rotor.GetActionWithName("OnOff_On").Apply(rotor); // Start rotor
+            }
+
+            /// <summary>
+            /// sets the rotor limits to [-infity,infinity]
+            /// </summary>
+            /// <param name="rotor">The rotor to set the limits on.</param>
+            public static void RemoveRotorLimits(IMyMotorAdvancedStator rotor)
+            {
+                SetRotorLimits(rotor, float.NegativeInfinity, float.PositiveInfinity);
+            }
+
+            /// <summary>
+            /// moves the pistons to a certain extension postion, if there are multiple pistons, then the destPosition is split between all the psitons
+            /// </summary>
+            /// <param name="pistons"></param>
+            /// <param name="destPosition"></param>
+            /// <param name="speed"></param>
+            /// <returns>true if the pistosn is in position</returns>
+            public static bool MovePistonsToPosition(List<IMyPistonBase> pistons, float destPosition, float speed)
+            {
+                var inPosition = true;
+
+                pistons.ForEach(piston =>
+                {
+                    inPosition &= MovePistonToPosition(piston, destPosition / (float)pistons.Count, speed / (float)pistons.Count);
+                });
+
+                return inPosition;
+            }
+
+            /// <summary>
+            /// moves the piston to a certain position
+            /// </summary>
+            /// <param name="piston"></param>
+            /// <param name="destinationPosition"></param>
+            /// <param name="speed"></param>
+            /// <returns>true if the piston is in position</returns>
+            public static bool MovePistonToPosition(IMyPistonBase piston, float destinationPosition, float speed)
+            {
+                piston.SetValueFloat("LowerLimit", destinationPosition);
+                piston.SetValueFloat("UpperLimit", destinationPosition);
+
+                var currentPosition = piston.CurrentPosition;
+
+                //move the rotor to within the limits
+                if (currentPosition == destinationPosition)
+                {
+                    // Stop piston
+                    piston.SetValueFloat("Velocity", 0);
+                    return true;
+                }
+                else if (currentPosition < destinationPosition)
+                {
+                    piston.SetValueFloat("Velocity", speed);
+                    return false;
+                }
+                else if (currentPosition > destinationPosition)
+                {
+                    piston.SetValueFloat("Velocity", -speed);
+                    return false;
+                }
+
+                return false;
+            }
         }
         #endregion
-
-        /*
-        *
-        * COPY TO HERE
-        *
-        */
     }
 }
