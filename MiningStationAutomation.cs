@@ -10,7 +10,6 @@ using System.Threading.Tasks;
 namespace SpaceEngineersScripts.MiningStationAutomation
 {
     //TODO: fix FlatteningState.Handle
-    //TODO: output to debug
     class MiningStationAutomation
     {
         #region programming environment essential inits, DO NOT COPY TO GAME
@@ -27,10 +26,12 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         const float DRILL_DOWN_SPEED = 0.008f; //discovered that .008 is still not too fast for the drill down speed
         static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure no small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
+        const bool DETAILEDDEBUG = false;
         const bool FORCEROTOR_TORQUE = true;
         const bool INIT_FLATTENING = false; //safety precaution
         const bool END_FLATTENING = false; //flatten pit bottom to allow cars to drive more easily;
         const float VERTICAL_OFFSET = 0f;
+        const float TRIGGER_DELAY = 1f; //after how many seconds the script should trigger again. (min 1)
 
         //BLOCK SETUP
         const string TIMER_NAME = "Timer";
@@ -50,6 +51,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             if (arg.Contains("reseststorage=true"))
             {
                 Storage = "";
+                Echo(string.Format("Storage has been reset!"));
+                return;
             }
 
             if (station == null)
@@ -70,6 +73,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         {
             public StateDTO GetStateDTO(Context context)
             {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, string.Format("Building State DTO with params {0}, {1}, {2}", typeof(InitState).Name, -1, -1));
                 return new StateDTO(typeof(InitState).Name, -1, -1);
             }
 
@@ -77,10 +81,20 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
+                //turn on all panels
+                drillStationBlocks.DebugPanels.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all panels");
+
                 //turn on the timer block and set the interval, also start the timer
                 drillStationBlocks.Timer.GetActionWithName("OnOff_On").Apply(drillStationBlocks.Timer);
-                drillStationBlocks.Timer.SetValueFloat("TriggerDelay", 1);
+                drillStationBlocks.Timer.SetValueFloat("TriggerDelay", TRIGGER_DELAY);
                 drillStationBlocks.Timer.GetActionWithName("Start").Apply(drillStationBlocks.Timer);
+
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("turned on the timer, set timer to {0} and started it.", TRIGGER_DELAY));
 
                 //turn on all antenna
                 drillStationBlocks.Antennas.ForEach(block =>
@@ -88,12 +102,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
 
-                //turn on all panels
-                drillStationBlocks.DebugPanels.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_On").Apply(block);
-                });
-
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all antennas");
 
                 //turn on all drills
                 drillStationBlocks.Drills.ForEach(block =>
@@ -101,11 +110,15 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
 
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all drills");
+
                 //turn on all hPistons
                 drillStationBlocks.HorizontalPiston.ForEach(block =>
                 {
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
+
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all horizontal pistons");
 
                 //turn on all refineries
                 drillStationBlocks.Refineries.ForEach(block =>
@@ -113,8 +126,12 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
 
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all horizontal pistons");
+
                 //turn on the rotor
                 drillStationBlocks.Rotor.GetActionWithName("OnOff_On").Apply(drillStationBlocks.Rotor);
+
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on the rotor");
 
                 //turn on all vPistons
                 drillStationBlocks.VerticalPistons.ForEach(block =>
@@ -122,16 +139,26 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     block.GetActionWithName("OnOff_On").Apply(block);
                 });
 
-                //if the storage contains state info, load it.
-                var storage = (context as DrillStation).PersistantStorage;
-                if (storage.Contains("state="))
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all vertical pistons");
+
+
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Moving to start Position");
+                //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                 {
-                    context.State = new StateDTO(storage).BuildState();
-                }
-                else {
-                    //move to the start position (pistons at 1m/s rotor at 1 rpm)
-                    if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
+                    //if the storage contains state info, load it.
+                    var storage = (context as DrillStation).PersistantStorage;
+                    if (storage.Contains("state="))
                     {
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "\nFound a state stored in persistant storage");
+
+                        context.State = new StateDTO(storage).BuildState();
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("The following state was build and set on context:\n{0}", context.State.GetStateDTO(context).ToString()));
+                    }
+                    else {
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "\nDid not find a state stored in persistant storage");
+
                         //when done proceed to the next state
                         if (INIT_FLATTENING)
                         {
@@ -141,6 +168,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                         {
                             context.State = new DeepeningState();
                         }
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Setting state on context: " + context.State.GetType().Name);
                     }
                 }
             }
@@ -153,7 +182,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public string Status(Context context)
             {
-                //leave blank
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, "retrieving status");
                 return "INIT";
             }
         }
@@ -177,6 +206,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public StateDTO GetStateDTO(Context context)
             {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, string.Format("Building State DTO with params {0}, {1}, {2}", typeof(FlatteningState).Name, currentCircle, depth));
                 return new StateDTO(typeof(FlatteningState).Name, currentCircle, depth);
             }
 
@@ -184,19 +214,27 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("Flattening: currentCircle {0}", currentCircle));
                 //if currentCircle < the number of radii to flatten, else move to start, and proceed to next state
                 if (currentCircle < DRILL_RADII.Count)
                 {
                     //move the rotor to -360 degree on even circles, to 0 degree on uneven circles, with ROTOR_RPM
                     var targetDegree = (currentCircle % 2 == 0) ? -360 : 0;
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("Flattening: targetDegree = {0}", targetDegree));
+
                     if ((drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, depth, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, targetDegree, ROTOR_RPM)))
                     {
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("Flattening: currentCircle {0} end reached", currentCircle));
+
                         //when it is not there
                         currentCircle++;
                     }
                 }
                 else
                 {
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Flattening DONE");
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Moving to start Position");
+
                     //move to the start position (pistons at 1m/s rotor at 1 rpm)
                     if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                     {
@@ -208,12 +246,16 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                         {
                             context.State = new DoneState();
                         }
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Setting state on context: " + context.State.GetType().Name);
                     }
                 }
             }
 
             public string Status(Context context)
             {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, "retrieving status");
+
                 if (currentCircle == DRILL_RADII.Count)
                 {
                     return "Flattening DONE";
@@ -242,6 +284,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public StateDTO GetStateDTO(Context context)
             {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, string.Format("Building State DTO with params {0}, {1}, {2}", typeof(DeepeningState).Name, currentCircle, depthReached ? verticalOffset : BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons)));
                 return new StateDTO(typeof(DeepeningState).Name, currentCircle, depthReached ? verticalOffset : BlockUtils.GetPistonsTotalPosition((context as DrillStation).DrillStationBlocks.VerticalPistons));
             }
 
@@ -259,11 +302,18 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("Deepening: currentCircle {0}", currentCircle));
+
                 //if currentCircle < the number of radii the flatten, else move to start, and proceed to next state
                 if (currentCircle < DRILL_RADII.Count)
                 {
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: depth reached {0}", depthReached));
+
                     if (depthReached)
                     {
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Moving to start Position");
+
                         //move to the start position (pistons at 1m/s rotor at 1 rpm)
                         if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, verticalOffset, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, 0, 1))
                         {
@@ -276,21 +326,32 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                         }
                     }
 
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: removing rotor limits"));
+
                     //unlock rotor
                     BlockUtils.RemoveRotorLimits(drillStationBlocks.Rotor);
+
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: setting rotor to turn"));
 
                     //set rotor speed
                     BlockUtils.setRotorSpeed(drillStationBlocks.Rotor, ROTOR_RPM);
 
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: moving pistons to depth {0}", TARGET_DEPTH));
+
                     //move the vPistons down until the depth is reached
                     if (BlockUtils.MovePistonsToPosition(drillStationBlocks.VerticalPistons, TARGET_DEPTH, DRILL_DOWN_SPEED))
                     {
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: TARGET DEPTH reached, increasing current circle, setting depth reached true, setting vertical offset to {0}", VERTICAL_OFFSET));
+
                         currentCircle++;
                         verticalOffset = VERTICAL_OFFSET;
                         depthReached = true;
                     }
                 }
                 else {
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Flattening DONE");
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Moving to start Position");
+
                     //move to the start position (pistons at 1m/s rotor at 1 rpm)
                     if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                     {
@@ -303,12 +364,16 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                         {
                             context.State = new DoneState();
                         }
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Setting state on context: " + context.State.GetType().Name);
                     }
                 }
             }
 
             public string Status(Context context)
             {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, "retrieving status");
+
                 if (currentCircle == DRILL_RADII.Count)
                 {
                     return "Drilling DONE";
@@ -327,6 +392,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         {
             public StateDTO GetStateDTO(Context context)
             {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, string.Format("Building State DTO with params {0}, {1}, {2}", typeof(DoneState).Name, -1, -1));
                 return new StateDTO(typeof(DoneState).Name, -1, -1);
             }
 
@@ -334,15 +400,11 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Moving to start Position");
+
                 //move to the start position (pistons at 1m/s rotor at 1 rpm)
                 if (!drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                     return;
-
-                //turn off all panels
-                drillStationBlocks.DebugPanels.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_Off").Apply(block);
-                });
 
                 //turn off all drills
                 drillStationBlocks.Drills.ForEach(block =>
@@ -350,20 +412,28 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     block.GetActionWithName("OnOff_Off").Apply(block);
                 });
 
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off all drills");
+
                 //turn off all hPistons
                 drillStationBlocks.HorizontalPiston.ForEach(block =>
                 {
                     block.GetActionWithName("OnOff_Off").Apply(block);
                 });
 
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off all horizontal pistons");
+
                 //turn off the rotor
                 drillStationBlocks.Rotor.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.Rotor);
+
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off the rotor");
 
                 //turn off all vPistons
                 drillStationBlocks.VerticalPistons.ForEach(block =>
                 {
                     block.GetActionWithName("OnOff_Off").Apply(block);
                 });
+
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off all vertical psitons");
 
                 //if the refineries do not have anything left to refine, turn them off
                 var allRefineriesDone = true;
@@ -389,18 +459,36 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     }
                 });
 
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("refineries have remaining work: {0}", allRefineriesDone));
+
                 //if all refineries are done: clean the remaining input and output, stop timer and shutdown script
                 if (allRefineriesDone)
                 {
                     drillStationBlocks.CleanRefineries(0);
                     drillStationBlocks.CleanRefineries(1);
 
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "cleaning refineries input and output inventories");
+
                     //timer
                     drillStationBlocks.Timer.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.Timer);
 
-                    //scriot
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off timer");
+
+                    //turn off all panels
+                    drillStationBlocks.DebugPanels.ForEach(block =>
+                    {
+                        block.GetActionWithName("OnOff_Off").Apply(block);
+                    });
+
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off all panels");
+
+                    //script
                     drillStationBlocks.ProgrammableBlock.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.ProgrammableBlock);
+
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off script");
                 }
+
+                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "No new state to set, end of cycle reached");
             }
 
             public void LoadFromStateDTO(StateDTO stateDTO)
@@ -410,6 +498,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public string Status(Context context)
             {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, "retrieving status");
+
                 return "DONE";
             }
         }
@@ -581,11 +671,16 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public override void Request()
             {
+                //clear the debug on each run
+                BlockUtils.ClearDebugOut(DrillStationBlocks.DebugPanels);
+
+                //handle the current state
                 base.Request();
 
                 //move the refined goods to the cargo container
                 DrillStationBlocks.CleanRefineries(1);
 
+                //output the status to antenna
                 BlockUtils.SetStatusToAntennas(DrillStationBlocks.Antennas, State.Status(this));
             }
         }
@@ -666,26 +761,49 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public bool ToPosition(List<IMyPistonBase> pistons1, float pistons1position, float speed1, List<IMyPistonBase> pistons2, float pistons2position, float speed2, IMyMotorAdvancedStator rotor, float rotorPosition, float rpm)
             {
+                if(DETAILEDDEBUG)
+                    BlockUtils.AppendDebugOut(DebugPanels, string.Format("Moving to position {0}, {1}, {2}", pistons1position, pistons2position, rotorPosition));
+
                 if (!BlockUtils.MovePistonsToPosition(pistons1, pistons1position, speed1))
                 {
+                    if (DETAILEDDEBUG)
+                        BlockUtils.AppendDebugOut(DebugPanels, string.Format("Moving pistons1 to position {0} with speed {1}, return false", pistons1position, speed1));
+
                     return false;
                 }
+
+                if (DETAILEDDEBUG)
+                    BlockUtils.AppendDebugOut(DebugPanels, "pistons1 reached position");
 
                 if (!BlockUtils.MovePistonsToPosition(pistons2, pistons2position, speed2))
                 {
+                    if (DETAILEDDEBUG)
+                        BlockUtils.AppendDebugOut(DebugPanels, string.Format("Moving pistons2 to position {0} with speed {1}, return false", pistons2position, speed2));
+
                     return false;
                 }
 
+                if (DETAILEDDEBUG)
+                    BlockUtils.AppendDebugOut(DebugPanels, "pistons2 reached position");
+
                 if (!BlockUtils.MoveRotorToPosition(rotor, rotorPosition, rpm))
                 {
+                    if (DETAILEDDEBUG)
+                        BlockUtils.AppendDebugOut(DebugPanels, string.Format("Moving rotor to position {0} with speed {1}, return false", rotorPosition, rpm));
+
                     return false;
                 }
+
+                if (DETAILEDDEBUG)
+                    BlockUtils.AppendDebugOut(DebugPanels, "rotor reached position. All parts reached position. return true");
 
                 return true;
             }
 
             public void CleanRefineries(int refineryInventoryIndex)
             {
+                BlockUtils.AppendDebugOut(DebugPanels, "Cleaning Refineries");
+
                 foreach (var refinery in Refineries)
                 {
                     //get the target inventory, 0 is input, 1 is output, else will probably throw error, CBA to check on this
@@ -721,6 +839,48 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
         class BlockUtils
         {
+            /// <summary>
+            /// clears the output from the debug panels
+            /// </summary>
+            /// <param name="debugPanels">List of IMyTextPanel</param>
+            public static void ClearDebugOut(List<IMyTextPanel> debugPanels)
+            {
+                if (DEBUG)
+                {
+                    if (debugPanels == null)
+                        return;
+
+                    debugPanels.ForEach(panel =>
+                    {
+                        panel.WritePublicTitle("DEBUG PANEL");
+                        panel.WritePublicText("");
+                    });
+                }
+            }
+
+            /// <summary>
+            /// appends the output to the debug panels
+            /// </summary>
+            /// <param name="debugPanels">List of IMyTextPanel</param>
+            /// <param name="debugOut">the output to append to the debug panels</param>
+            public static void AppendDebugOut(List<IMyTextPanel> debugPanels, string debugOut)
+            {
+                if (DEBUG)
+                {
+                    if (debugPanels == null)
+                        return;
+
+                    debugPanels.ForEach(panel =>
+                    {
+                        panel.WritePublicTitle("DEBUG PANEL");
+
+                        var currentOut = panel.GetPublicText();
+
+                        panel.WritePublicText(string.Format("{0}\n{1}", currentOut, debugOut));
+                    });
+                }
+            }
+
             /// <summary>
             /// Sets the state to all antena connected on the GridTerminalSystem
             /// </summary>
