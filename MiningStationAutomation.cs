@@ -24,8 +24,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         #region Config
         //OPERATIONAL
         const float ROTOR_RPM = 0.5f;
-        const float DRILL_DOWN_SPEED = 0.008f; //discovered that .008 is still not to fast for the drill down speed
-        static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure nu small floating rocks are left, do smaller intervals.
+        const float DRILL_DOWN_SPEED = 0.008f; //discovered that .008 is still not too fast for the drill down speed
+        static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure no small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
         const bool INIT_FLATTENING = false; //safety precaution
@@ -184,10 +184,10 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
-                //if currentCircle < the number of radii the flatten, else move to start, and proceed to next state
+                //if currentCircle < the number of radii to flatten, else move to start, and proceed to next state
                 if (currentCircle < DRILL_RADII.Count)
                 {
-                    //move the rotor to -360 degree on even circles, to 0 degree on unevem circles, with ROTOR_RPM
+                    //move the rotor to -360 degree on even circles, to 0 degree on uneven circles, with ROTOR_RPM
                     var targetDegree = (currentCircle % 2 == 0) ? -360 : 0;
                     if ((drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, depth, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, targetDegree, ROTOR_RPM)))
                     {
