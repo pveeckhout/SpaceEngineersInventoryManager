@@ -32,6 +32,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         const bool END_FLATTENING = false; //flatten pit bottom to allow cars to drive more easily;
         const float VERTICAL_OFFSET = 0f;
         const float TRIGGER_DELAY = 1f; //after how many seconds the script should trigger again. (min 1)
+        const float CONTAINER_THRESHOLD = 0.9F;
 
         //BLOCK SETUP
         const string TIMER_NAME = "Timer";
@@ -41,6 +42,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         const string V_PISTON_NAME = "Vertical Piston";
         const string DRILL_STATION_NAME = "Drill Station";
         const string DEBUG_PANEL_NAME = "Debug Panel";
+        const string DRILL_STATION_CONTAINER = "Drill Station Container";
         const float TARGET_DEPTH = 20f;
         #endregion
 
@@ -251,8 +253,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     }
                 }
             }
-
-            public string Status(Context context)
+            
+              public string Status(Context context)
             {
                 BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, "retrieving status");
 
@@ -270,6 +272,50 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 this.currentCircle = stateDTO.Circle;
                 this.depth = stateDTO.Depth;
+            }
+        }
+            
+            class ContainerFullState : State
+        {
+            public StateDTO GetStateDTO(Context context)
+            {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, string.Format("Building State DTO with params {0}, {1}, {2}", typeof(ContainerFullState).Name, circle, depth));
+                return new StateDTO(typeof(ContainerFullState).Name, circle, depth);
+            }
+
+            public void Handle(Context context)
+            {
+                var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
+
+                //if container was emptied proceed to next state
+                if (BlockUtils.CheckCapacity(drillStationBlocks.CargoContainers))
+                {
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container was emptied");
+                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "returning to previous State");
+                    
+                        if (depth != TARGET_DEPTH)
+                        {
+                            context.State = new DeepeningState();
+                        }
+                        else
+                        {
+                            context.State = new DoneState();
+                        }
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Setting state on context: " + context.State.GetType().Name);
+                    }
+                }
+            }
+
+            public string Status(Context context)
+            {
+                BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, "retrieving status");
+                    return "Container Full"
+            }
+
+            public void LoadFromStateDTO(StateDTO stateDTO)
+            {
+                return;
             }
         }
 
@@ -308,7 +354,13 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 if (currentCircle < DRILL_RADII.Count)
                 {
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: depth reached {0}", depthReached));
-
+                   
+                   // Check container capacity
+                    if (!BlockUtils.CheckCapacity(drillStationBlocks.CargoContainers)){
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container full, going to ContainerFullState");
+                        context.State = new ContainerFullState();
+                    }
+                    
                     if (depthReached)
                     {
 
@@ -758,7 +810,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 GridTerminalSystem.GetBlocksOfType<IMyCargoContainer>(containerTempList);
                 containerTempList.ForEach(container => CargoContainers.Add(container as IMyCargoContainer));
             }
-
+            
             public bool ToPosition(List<IMyPistonBase> pistons1, float pistons1position, float speed1, List<IMyPistonBase> pistons2, float pistons2position, float speed2, IMyMotorAdvancedStator rotor, float rotorPosition, float rpm)
             {
                 if(DETAILEDDEBUG)
@@ -1067,6 +1119,25 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 }
 
                 return false;
+            }
+            
+             /// <summary>
+            /// Check container capacity
+            /// </summary>
+            /// <param name="cargocontainers"></param>
+            /// <param name="destPosition"></param>
+            /// <returns>true if cargo containers have space</returns>
+            public static bool CapacityCheck(List<IMyCargoContainer> cargoContainers)
+            {
+                for (int i = 0; i &lt; containers.Count; i++) {
+                    maxVolume += (containers[i]).GetInventory(0).MaxVolume.RawValue;
+                    currentVolume += (containers[i]).GetInventory(0).CurrentVolume.RawValue;
+                 }
+
+                //Check if we are above or below threshold
+                bool freeSpace = (currentVolume / (float)maxVolume >= THRESHOLD);
+                
+                return freeSpace
             }
         }
         #endregion
