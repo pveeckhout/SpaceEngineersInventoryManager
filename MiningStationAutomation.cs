@@ -32,7 +32,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         const bool END_FLATTENING = false; //flatten pit bottom to allow cars to drive more easily;
         const float VERTICAL_OFFSET = 0f;
         const float TRIGGER_DELAY = 1f; //after how many seconds the script should trigger again. (min 1)
-        const float CONTAINER_THRESHOLD = 0.9F;
+        const float CONTAINER_THRESHOLD = 0.9f;
 
         //BLOCK SETUP
         const string TIMER_NAME = "Timer";
