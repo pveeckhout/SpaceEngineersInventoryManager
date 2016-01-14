@@ -312,7 +312,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
                 //if container was emptied proceed to next state
-                if (BlockUtils.CapacityCheck(drillStationBlocks.CargoContainers, CONTAINER_LOWER_THRESHOLD))
+                if (BlockUtils.ContainersCapacityReached(drillStationBlocks.CargoContainers, CONTAINER_LOWER_THRESHOLD))
                 {
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container was emptied");
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "returning to previous State");
@@ -386,7 +386,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: depth reached {0}", depthReached));
 
                     // Check container capacity
-                    if (!BlockUtils.CapacityCheck(drillStationBlocks.CargoContainers, CONTAINER_UPPER_THRESHOLD))
+                    if (!BlockUtils.ContainersCapacityReached(drillStationBlocks.CargoContainers, CONTAINER_UPPER_THRESHOLD))
                     {
                         BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container full, going to ContainerFullState");
                         context.State = new ContainerFullState(currentCircle, BlockUtils.GetPistonsTotalPosition(drillStationBlocks.VerticalPistons));
@@ -1158,7 +1158,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             /// <param name="cargocontainers"></param>
             /// <param name="destPosition"></param>
             /// <returns>true if cargo containers have space</returns>
-            public static bool CapacityCheck(List<IMyCargoContainer> cargoContainers, float threshold)
+            public static bool ContainersCapacityReached(List<IMyCargoContainer> cargoContainers, float threshold)
             {
                 float maxVolume = 0;
                 float currentVolume = 0;
