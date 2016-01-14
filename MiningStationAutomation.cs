@@ -74,6 +74,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class InitState : State
         {
+            private StateDTO stateDTO = null;
+
             public StateDTO GetStateDTO(Context context)
             {
                 BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, string.Format("Building State DTO with params {0}, {1}, {2}", typeof(InitState).Name, -1, -1));
@@ -144,37 +146,31 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
                 BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all vertical pistons");
 
+                //if the storage contains state info, load it.
+                var storage = (context as DrillStation).PersistantStorage;
+                if (storage.Contains("state="))
+                {
+                    var stateDTO = new StateDTO(storage);
+
+                    //check if the state in the Staorage is NOT the init state ==> this causes infinite loops
+                    if (stateDTO.State != this.GetType().Name)
+                    {
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "\nFound a state stored in persistant storage");
+
+                        //store the state locally to use once we reach init position
+                        this.stateDTO = stateDTO;
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("The following state was build and set on context:\n{0}", context.State.GetStateDTO(context).ToString()));
+                    }
+                }
 
                 BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Moving to start Position");
                 //move to the start position (pistons at 1m/s rotor at 1 rpm)
                 if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                 {
-                    //if the storage contains state info, load it.
-                    var storage = (context as DrillStation).PersistantStorage;
-                    if (storage.Contains("state="))
+                    if (this.stateDTO != null)
                     {
-                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "\nFound a state stored in persistant storage");
-
-                        var stateDTO = new StateDTO(storage);
-
-                        //check if the state in the Staorage is NOT the init state ==> this causes infinite loops
-                        if (stateDTO.State != this.GetType().Name)
-                        {
-                            context.State = stateDTO.BuildState();
-
-                            BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("The following state was build and set on context:\n{0}", context.State.GetStateDTO(context).ToString()));
-                        }
-                        else
-                        {
-                            if (INIT_FLATTENING)
-                            {
-                                context.State = new FlatteningState(VERTICAL_OFFSET);
-                            }
-                            else
-                            {
-                                context.State = new DeepeningState();
-                            }
-                        }
+                        context.State = this.stateDTO.BuildState();
                     }
                     else
                     {
@@ -316,7 +312,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
                 //if container was emptied proceed to next state
-                if (!BlockUtils.ContainersCapacityReached(drillStationBlocks.CargoContainers, CONTAINER_LOWER_THRESHOLD))
+                if (BlockUtils.CapacityCheck(drillStationBlocks.CargoContainers, CONTAINER_LOWER_THRESHOLD))
                 {
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container was emptied");
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "returning to previous State");
@@ -390,7 +386,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: depth reached {0}", depthReached));
 
                     // Check container capacity
-                    if (BlockUtils.ContainersCapacityReached(drillStationBlocks.CargoContainers, CONTAINER_UPPER_THRESHOLD))
+                    if (!BlockUtils.CapacityCheck(drillStationBlocks.CargoContainers, CONTAINER_UPPER_THRESHOLD))
                     {
                         BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container full, going to ContainerFullState");
                         context.State = new ContainerFullState(currentCircle, BlockUtils.GetPistonsTotalPosition(drillStationBlocks.VerticalPistons));
@@ -1162,7 +1158,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             /// <param name="cargocontainers"></param>
             /// <param name="destPosition"></param>
             /// <returns>true if cargo containers have space</returns>
-            public static bool ContainersCapacityReached(List<IMyCargoContainer> cargoContainers, float threshold)
+            public static bool CapacityCheck(List<IMyCargoContainer> cargoContainers, float threshold)
             {
                 float maxVolume = 0;
                 float currentVolume = 0;
