@@ -32,7 +32,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         const bool END_FLATTENING = false; //flatten pit bottom to allow cars to drive more easily;
         const float VERTICAL_OFFSET = 0f;
         const float TRIGGER_DELAY = 1f; //after how many seconds the script should trigger again. (min 1)
-        const float CONTAINER_THRESHOLD = 0.9f;
+        const float CONTAINER_UPPER_THRESHOLD = 0.9f;
+        const float CONTAINER_LOWER_THRESHOLD = 0.5f;
 
         //BLOCK SETUP
         const string TIMER_NAME = "Timer";
@@ -297,7 +298,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
                 //if container was emptied proceed to next state
-                if (BlockUtils.CapacityCheck(drillStationBlocks.CargoContainers, CONTAINER_THRESHOLD))
+                if (BlockUtils.CapacityCheck(drillStationBlocks.CargoContainers, CONTAINER_LOWER_THRESHOLD))
                 {
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container was emptied");
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "returning to previous State");
@@ -371,7 +372,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("deepening: depth reached {0}", depthReached));
 
                     // Check container capacity
-                    if (!BlockUtils.CapacityCheck(drillStationBlocks.CargoContainers, CONTAINER_THRESHOLD))
+                    if (!BlockUtils.CapacityCheck(drillStationBlocks.CargoContainers, CONTAINER_UPPER_THRESHOLD))
                     {
                         BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container full, going to ContainerFullState");
                         context.State = new ContainerFullState(currentCircle, BlockUtils.GetPistonsTotalPosition(drillStationBlocks.VerticalPistons));
