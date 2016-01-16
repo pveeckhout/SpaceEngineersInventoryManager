@@ -48,7 +48,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         #endregion
 
         DrillStation station = null;
-
+        
         void Main(string arg)
         {
             if (arg.Contains("reseststorage=true"))
