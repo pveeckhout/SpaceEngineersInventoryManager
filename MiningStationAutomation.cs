@@ -375,7 +375,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 //we need to know how much the drills drop per round to build in safety margin
                 var safetyMargin = 60 * DRILL_DOWN_SPEED / ROTOR_RPM;
 
-                verticalOffset = stateDTO.Depth - safetyMargin;
+                verticalOffset = (safetyMargin < stateDTO.Depth) ? stateDTO.Depth - safetyMargin : 0;
             }
 
             public void Handle(Context context)
