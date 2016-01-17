@@ -23,12 +23,12 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         //OPERATIONAL
         const float ROTOR_RPM = 0.5f;
         const float DRILL_DOWN_SPEED = 0.008f; //discovered that .008 is still not too fast for the drill down speed
-        static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.5f, 7f, 10f }; //Drills can technically do a 5 wide trench, to be sure no small floating rocks are left, do smaller intervals.
+        static readonly List<float> DRILL_RADII = new List<float>() { 0f, 3.3333f, 6.6666f, 10f }; //Drills can technically do a 5 wide trench, to be sure no small floating rocks are left, do smaller intervals.
         const bool DEBUG = true;
-        const bool DETAILEDDEBUG = false;
+        const bool DETAILEDDEBUG = true;
         const bool FORCEROTOR_TORQUE = true;
-        const bool INIT_FLATTENING = false; //safety precaution
-        const bool END_FLATTENING = false; //flatten pit bottom to allow cars to drive more easily;
+        const bool INIT_FLATTENING = true; //safety precaution
+        const bool END_FLATTENING = true; //flatten pit bottom to allow cars to drive more easily;
         const float VERTICAL_OFFSET = 0f;
         const float TRIGGER_DELAY = 1f; //after how many seconds the script should trigger again. (min 1)
         const float CONTAINER_UPPER_THRESHOLD = 0.9f;
@@ -239,7 +239,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 if (currentCircle < DRILL_RADII.Count)
                 {
                     //move the rotor to -360 degree on even circles, to 0 degree on uneven circles, with ROTOR_RPM
-                    var targetDegree = (currentCircle % 2 == 0) ? -360 : 0;
+                    var targetDegree = (currentCircle % 2 == 0) ? 355 : -355;
                     BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("Flattening: targetDegree = {0}", targetDegree));
 
                     if ((drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, depth, 1, drillStationBlocks.HorizontalPiston, DRILL_RADII[currentCircle], 1, drillStationBlocks.Rotor, targetDegree, ROTOR_RPM)))
