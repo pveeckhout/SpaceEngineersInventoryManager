@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 
 namespace SpaceEngineersScripts.MiningStationAutomation
 {
-    //TODO: fix FlatteningState.Handle
     class MiningStationAutomation
     {
         #region programming environment essential inits, DO NOT COPY TO GAME
@@ -48,7 +47,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         #endregion
 
         DrillStation station = null;
-
+        
         void Main(string arg)
         {
             if (arg.Contains("reseststorage=true"))
@@ -74,6 +73,13 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         /// </summary>
         class InitState : State
         {
+            private StateDTO loadedPersistantStateDTO;
+
+            public InitState()
+            {
+                this.loadedPersistantStateDTO = null;
+            }
+
             public StateDTO GetStateDTO(Context context)
             {
                 BlockUtils.AppendDebugOut((context as DrillStation).DrillStationBlocks.DebugPanels, string.Format("Building State DTO with params {0}, {1}, {2}", typeof(InitState).Name, -1, -1));
@@ -95,32 +101,10 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 //move to the start position (pistons at 1m/s rotor at 1 rpm)
                 if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                 {
-                    //if the storage contains state info, load it.
-                    var storage = (context as DrillStation).PersistantStorage;
-                    if (storage.Contains("state="))
+                    if (this.loadedPersistantStateDTO != null)
                     {
-                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "\nFound a state stored in persistant storage");
-
-                        var stateDTO = new StateDTO(storage);
-
-                        //check if the state in the Staorage is NOT the init state ==> this causes infinite loops
-                        if (stateDTO.State != this.GetType().Name)
-                        {
-                            context.State = stateDTO.BuildState();
-
-                            BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("The following state was build and set on context:\n{0}", context.State.GetStateDTO(context).ToString()));
-                        }
-                        else
-                        {
-                            if (INIT_FLATTENING)
-                            {
-                                context.State = new FlatteningState(VERTICAL_OFFSET);
-                            }
-                            else
-                            {
-                                context.State = new DeepeningState();
-                            }
-                        }
+                        context.State = this.loadedPersistantStateDTO.BuildState();
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("The following state was set on context:\n{0}", context.State.GetStateDTO(context).ToString()));
                     }
                     else
                     {
@@ -362,7 +346,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                 //we need to know how much the drills drop per round to build in safety margin
                 var safetyMargin = 60 * DRILL_DOWN_SPEED / ROTOR_RPM;
 
-                verticalOffset = stateDTO.Depth - safetyMargin;
+                verticalOffset = (safetyMargin < stateDTO.Depth) ? stateDTO.Depth - safetyMargin : 0;
             }
 
             public void Handle(Context context)
