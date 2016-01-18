@@ -90,81 +90,12 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
-                //turn on all panels
-                drillStationBlocks.DebugPanels.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_On").Apply(block);
-                });
+                //turn on all blocks
+                drillStationBlocks.TurnOnAllBlocks();
 
-                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all panels");
-
-                //turn on the timer block and set the interval, also start the timer
-                drillStationBlocks.Timer.GetActionWithName("OnOff_On").Apply(drillStationBlocks.Timer);
+                //set the timer wait and start it
                 drillStationBlocks.Timer.SetValueFloat("TriggerDelay", TRIGGER_DELAY);
                 drillStationBlocks.Timer.GetActionWithName("Start").Apply(drillStationBlocks.Timer);
-
-                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("turned on the timer, set timer to {0} and started it.", TRIGGER_DELAY));
-
-                //turn on all antenna
-                drillStationBlocks.Antennas.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_On").Apply(block);
-                });
-
-                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all antennas");
-
-                //turn on all drills
-                drillStationBlocks.Drills.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_On").Apply(block);
-                });
-
-                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all drills");
-
-                //turn on all hPistons
-                drillStationBlocks.HorizontalPiston.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_On").Apply(block);
-                });
-
-                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all horizontal pistons");
-
-                //turn on all refineries
-                drillStationBlocks.Refineries.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_On").Apply(block);
-                });
-
-                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all horizontal pistons");
-
-                //turn on the rotor
-                drillStationBlocks.Rotor.GetActionWithName("OnOff_On").Apply(drillStationBlocks.Rotor);
-
-                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on the rotor");
-
-                //turn on all vPistons
-                drillStationBlocks.VerticalPistons.ForEach(block =>
-                {
-                    block.GetActionWithName("OnOff_On").Apply(block);
-                });
-
-                BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned on all vertical pistons");
-
-                //if the storage contains state info and the state info is NOT the init state (this causes infinite loops), load it.
-                var storage = (context as DrillStation).PersistantStorage;
-                if (storage.Contains("state=") && !storage.Contains("state=" + typeof(InitState).Name))
-                {
-                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Found a state worth loading stored in persistant storage");
-
-                    //store the state locally to use once we reach init position
-                    this.loadedPersistantStateDTO = new StateDTO(storage);
-
-                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, string.Format("The following state was build:\n{0}", this.loadedPersistantStateDTO.ToString()));
-                }
-                else
-                {
-                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Did not find a state worth loading stored in persistant storage");
-                }
 
                 BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Moving to start Position");
                 //move to the start position (pistons at 1m/s rotor at 1 rpm)
@@ -314,17 +245,58 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             {
                 var drillStationBlocks = (context as DrillStation).DrillStationBlocks;
 
-                //if container was emptied proceed to next state
-                if (!BlockUtils.ContainersCapacityReached(drillStationBlocks.CargoContainers, CONTAINER_LOWER_THRESHOLD))
+                //move to the start position (pistons at 1m/s rotor at 1 rpm)
+                if (drillStationBlocks.ToPosition(drillStationBlocks.VerticalPistons, 0, 1, drillStationBlocks.HorizontalPiston, 0, 1, drillStationBlocks.Rotor, 0, 1))
                 {
-                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container was emptied");
-                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "returning to previous State");
+                    //if the containers are not emptied to below lower threshold turn off the blocks otherwise turn them on again and proceed wit deepeningState
+                    if (BlockUtils.ContainersCapacityReached(drillStationBlocks.CargoContainers, CONTAINER_LOWER_THRESHOLD))
+                    {
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container not emptied, turning off the drilling blocks");
 
-                    context.State = new DeepeningState();
-                    (context.State as DeepeningState).SetCurrentCircle(circle);
-                    (context.State as DeepeningState).SetVerticalOffset(depth);
+                        //turn off all drills
+                        drillStationBlocks.Drills.ForEach(block =>
+                        {
+                            block.GetActionWithName("OnOff_Off").Apply(block);
+                        });
 
-                    BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Setting state on context: " + context.State.GetType().Name);
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned of all drills");
+
+                        //turn off all hPistons
+                        drillStationBlocks.HorizontalPiston.ForEach(block =>
+                        {
+                            block.GetActionWithName("OnOff_Off").Apply(block);
+                        });
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off all horizontal pistons");
+
+                        //turn off the rotor
+                        drillStationBlocks.Rotor.GetActionWithName("OnOff_Off").Apply(drillStationBlocks.Rotor);
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned off the rotor");
+
+                        //turn off all vPistons
+                        drillStationBlocks.VerticalPistons.ForEach(block =>
+                        {
+                            block.GetActionWithName("OnOff_Off").Apply(block);
+                        });
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "turned of all vertical pistons");
+                    }
+                    else
+                    {
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Container was emptied, turning on the blocks");
+
+                        //turn on all blocks, just for good measure
+                        drillStationBlocks.TurnOnAllBlocks();
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "returning to deepening State");
+
+                        context.State = new DeepeningState();
+                        (context.State as DeepeningState).SetCurrentCircle(circle);
+                        (context.State as DeepeningState).SetVerticalOffset(depth);
+
+                        BlockUtils.AppendDebugOut(drillStationBlocks.DebugPanels, "Setting state on context: " + context.State.GetType().Name);
+                    }
                 }
             }
 
@@ -920,6 +892,67 @@ namespace SpaceEngineersScripts.MiningStationAutomation
                         }
                     }
                 }
+            }
+
+            public void TurnOnAllBlocks()
+            {
+                //turn on all panels
+                this.DebugPanels.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                BlockUtils.AppendDebugOut(this.DebugPanels, "turned on all panels");
+
+                //turn on the timer block and set the interval, also start the timer
+                this.Timer.GetActionWithName("OnOff_On").Apply(this.Timer);
+
+                BlockUtils.AppendDebugOut(this.DebugPanels, string.Format("turned on the timer, set timer to {0} and started it.", TRIGGER_DELAY));
+
+                //turn on all antenna
+                this.Antennas.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                BlockUtils.AppendDebugOut(this.DebugPanels, "turned on all antennas");
+
+                //turn on all drills
+                this.Drills.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                BlockUtils.AppendDebugOut(this.DebugPanels, "turned on all drills");
+
+                //turn on all hPistons
+                this.HorizontalPiston.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                BlockUtils.AppendDebugOut(this.DebugPanels, "turned on all horizontal pistons");
+
+                //turn on all refineries
+                this.Refineries.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                BlockUtils.AppendDebugOut(this.DebugPanels, "turned on all horizontal pistons");
+
+                //turn on the rotor
+                this.Rotor.GetActionWithName("OnOff_On").Apply(this.Rotor);
+
+                BlockUtils.AppendDebugOut(this.DebugPanels, "turned on the rotor");
+
+                //turn on all vPistons
+                this.VerticalPistons.ForEach(block =>
+                {
+                    block.GetActionWithName("OnOff_On").Apply(block);
+                });
+
+                BlockUtils.AppendDebugOut(this.DebugPanels, "turned on all vertical pistons");
             }
         }
 
