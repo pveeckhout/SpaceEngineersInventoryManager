@@ -15,7 +15,6 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         private static IMyGridTerminalSystem GridTerminalSystem;
         private static IMyProgrammableBlock Me { get; }
         private static void Echo(string message) { }
-        private static string Storage;
         #endregion
 
         #region Programmable block script
@@ -43,29 +42,64 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         const string DRILL_STATION_NAME = "Drill Station";
         const string DEBUG_PANEL_NAME = "Debug Panel";
         const string DRILL_STATION_CONTAINER = "Drill Station Container";
+        const string STORAGE_LIGHT = "FUNCTION=STORAGE";
         const float TARGET_DEPTH = 20f;
         #endregion
 
         DrillStation station = null;
-        
+
         void Main(string arg)
         {
+            var interiorLightTempList = new List<IMyTerminalBlock>();
+            GridTerminalSystem.GetBlocksOfType<IMyInteriorLight>(interiorLightTempList);
+
+            var currentStateString = "";
+
             if (arg.Contains("reseststorage=true"))
             {
-                Storage = "";
+                interiorLightTempList.ForEach(light =>
+                {
+                    light.SetCustomName(STORAGE_LIGHT);
+                });
+
                 Echo(string.Format("Storage has been reset!"));
                 return;
             }
 
             if (station == null)
             {
-                station = new DrillStation(GridTerminalSystem, Storage);
+                interiorLightTempList.ForEach(light =>
+                {
+                    currentStateString = light.CustomName;
+                });
+
+                Echo(string.Format("Storage has been loaded!\n" + currentStateString));
+
+                station = new DrillStation(GridTerminalSystem, currentStateString);
             }
 
             station.Request();
 
-            Storage = station.State.GetStateDTO(station).ToString();
-            Echo(string.Format("Storage:\n{0}", Storage));
+            var currentState = station.State.GetStateDTO(station);
+
+            interiorLightTempList.ForEach(light =>
+            {
+                if (light.CustomName.StartsWith(STORAGE_LIGHT))
+                {
+                    StateDTO lightState = new StateDTO(light.CustomName);
+                    if (currentState.Circle > lightState.Circle)
+                    {
+                        light.SetCustomName(STORAGE_LIGHT + "\n" + currentState.ToString());
+                    }
+                    else if (currentState.Circle == lightState.Circle)
+                    {
+                        if (currentState.Depth > lightState.Depth)
+                        {
+                            light.SetCustomName(STORAGE_LIGHT + "\n" + currentState.ToString());
+                        }
+                    }
+                }
+            });
         }
 
         /// <summary>
@@ -127,7 +161,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             public void LoadFromStateDTO(StateDTO stateDTO)
             {
-                //nothing to do here
+                //nothing to do here except set the stateDTO
+                this.loadedPersistantStateDTO = stateDTO;
                 return;
             }
 
@@ -708,6 +743,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
                 //store the storage
                 this._storage = storage;
+
+                State.LoadFromStateDTO(new StateDTO(storage)); 
 
                 //build the station blocks
                 this._drillStationBlocks = new DrillStationBlocks(GridTerminalSystem);
