@@ -53,14 +53,10 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             var interiorLightTempList = new List<IMyTerminalBlock>();
             GridTerminalSystem.GetBlocksOfType<IMyInteriorLight>(interiorLightTempList);
 
-            var currentStateString = "";
-
             if (arg.Contains("reseststorage=true"))
             {
-                interiorLightTempList.ForEach(light =>
-                {
-                    light.SetCustomName(STORAGE_LIGHT);
-                });
+
+                BlockUtils.ResetStateStorageLights(interiorLightTempList.Cast<IMyInteriorLight>().ToList());
 
                 Echo(string.Format("Storage has been reset!"));
                 return;
@@ -68,38 +64,10 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
             if (station == null)
             {
-                interiorLightTempList.ForEach(light =>
-                {
-                    currentStateString = light.CustomName;
-                });
-
-                Echo(string.Format("Storage has been loaded!\n" + currentStateString));
-
-                station = new DrillStation(GridTerminalSystem, currentStateString);
+                station = new DrillStation(GridTerminalSystem);
             }
 
             station.Request();
-
-            var currentState = station.State.GetStateDTO(station);
-
-            interiorLightTempList.ForEach(light =>
-            {
-                if (light.CustomName.StartsWith(STORAGE_LIGHT))
-                {
-                    StateDTO lightState = new StateDTO(light.CustomName);
-                    if (currentState.Circle > lightState.Circle)
-                    {
-                        light.SetCustomName(STORAGE_LIGHT + "\n" + currentState.ToString());
-                    }
-                    else if (currentState.Circle == lightState.Circle)
-                    {
-                        if (currentState.Depth > lightState.Depth)
-                        {
-                            light.SetCustomName(STORAGE_LIGHT + "\n" + currentState.ToString());
-                        }
-                    }
-                }
-            });
         }
 
         /// <summary>
@@ -674,7 +642,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             /// <returns></returns>
             public override string ToString()
             {
-                return string.Format("state={0}\ncircle={1}\ndepth={2}", State, Circle, Depth);
+                return string.Format("state={0},circle={1},depth={2}", State, Circle, Depth);
             }
 
             /// <summary>
@@ -733,29 +701,18 @@ namespace SpaceEngineersScripts.MiningStationAutomation
         class DrillStation : Context
         {
             private DrillStationBlocks _drillStationBlocks;
-            public string _storage;
 
             // Constructor
-            public DrillStation(IMyGridTerminalSystem GridTerminalSystem, string storage)
+            public DrillStation(IMyGridTerminalSystem GridTerminalSystem)
             {
                 //init is the default state
                 State = new InitState();
 
-                //store the storage
-                this._storage = storage;
-
-                State.LoadFromStateDTO(new StateDTO(storage)); 
-
                 //build the station blocks
                 this._drillStationBlocks = new DrillStationBlocks(GridTerminalSystem);
-            }
 
-            public string PersistantStorage
-            {
-                get
-                {
-                    return _storage;
-                }
+                //store the storage
+                State.LoadFromStateDTO(new StateDTO(BlockUtils.GetStateFromStateStorageLights(this._drillStationBlocks.StateStorageLights)));
             }
 
             // Gets the DrillStationBlocks
@@ -777,6 +734,8 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
                 //output the status to antenna
                 BlockUtils.SetStatusToAntennas(DrillStationBlocks.Antennas, State.Status(this));
+
+                BlockUtils.SetStateToStateStorageLights(DrillStationBlocks.StateStorageLights, State.GetStateDTO(this));
             }
         }
 
@@ -792,9 +751,21 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             public List<IMyCargoContainer> CargoContainers { get; set; }
             public IMyTimerBlock Timer { get; set; }
             public IMyProgrammableBlock ProgrammableBlock { get; set; }
+            public List<IMyInteriorLight> StateStorageLights { get; set; }
 
             public DrillStationBlocks(IMyGridTerminalSystem GridTerminalSystem)
             {
+                StateStorageLights = new List<IMyInteriorLight>();
+                var interiorLightTempList = new List<IMyTerminalBlock>();
+                GridTerminalSystem.GetBlocksOfType<IMyInteriorLight>(interiorLightTempList);
+                interiorLightTempList.ForEach(light =>
+                {
+                    if (light.CustomName.StartsWith(STORAGE_LIGHT))
+                    {
+                        StateStorageLights.Add(light as IMyInteriorLight);
+                    }
+                });
+
                 Rotor = GridTerminalSystem.GetBlockWithName(ROTOR_NAME) as IMyMotorAdvancedStator;
                 Timer = GridTerminalSystem.GetBlockWithName(TIMER_NAME) as IMyTimerBlock;
                 ProgrammableBlock = GridTerminalSystem.GetBlockWithName(PROGRAMMABLEBLOCK_NAME) as IMyProgrammableBlock;
@@ -995,6 +966,54 @@ namespace SpaceEngineersScripts.MiningStationAutomation
 
         class BlockUtils
         {
+            public static void ResetStateStorageLights(List<IMyInteriorLight> stateStorageLights)
+            {
+                stateStorageLights.ForEach(light =>
+                {
+                    if (light.CustomName.StartsWith(STORAGE_LIGHT))
+                    {
+                        light.SetCustomName(STORAGE_LIGHT);
+                    }
+                });
+            }
+
+            public static void SetStateToStateStorageLights(List<IMyInteriorLight> stateStorageLights, StateDTO state)
+            {
+
+                stateStorageLights.ForEach(light =>
+                {
+                    if (light.CustomName.StartsWith(STORAGE_LIGHT))
+                    {
+                        StateDTO lightState = new StateDTO(light.CustomName);
+                        if (state.Circle > lightState.Circle)
+                        {
+                            Echo("setting state from " + lightState.ToString() + " to " + state.ToString());
+                            light.SetCustomName(STORAGE_LIGHT + "," + state.ToString());
+                        }
+                        else if (state.Circle == lightState.Circle)
+                        {
+                            if (state.Depth > lightState.Depth)
+                            {
+                                Echo("setting state from " + lightState.ToString() + " to " + state.ToString());
+                                light.SetCustomName(STORAGE_LIGHT + "," + state.ToString());
+                            }
+                        }
+                    }
+                });
+            }
+
+            public static string GetStateFromStateStorageLights(List<IMyInteriorLight> stateStorageLights)
+            {
+                var stateString = "";
+
+                if (stateStorageLights.Count > 0)
+                {
+                    stateString = stateStorageLights.First().CustomName;
+                }
+
+                return stateString;
+            }
+
             /// <summary>
             /// clears the output from the debug panels
             /// </summary>
