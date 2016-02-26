@@ -53,7 +53,7 @@ namespace SpaceEngineersScripts.MiningStationAutomation
             var interiorLightTempList = new List<IMyTerminalBlock>();
             GridTerminalSystem.GetBlocksOfType<IMyInteriorLight>(interiorLightTempList);
 
-            if (arg.Contains("reseststorage=true"))
+            if (arg.Contains("resetststorage=true"))
             {
 
                 BlockUtils.ResetStateStorageLights(interiorLightTempList.Cast<IMyInteriorLight>().ToList());
